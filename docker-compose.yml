@@ -1,0 +1,83 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  presidio:
+    build:
+      context: ./presidio-service
+    restart: unless-stopped
+    environment:
+      PRESIDIO_HOST: 0.0.0.0
+      PRESIDIO_PORT: 5002
+      PRESIDIO_API_TOKEN: ${PRESIDIO_API_TOKEN:?Set PRESIDIO_API_TOKEN in .env}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      MONGODB_URI: mongodb://mongo:27017/ai-coach
+      MONGODB_DB_NAME: ai-coach
+      LLM_PROVIDER: ${LLM_PROVIDER:-inception}
+      LLM_MODEL: ${LLM_MODEL:-mercury-3}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      INCEPTION_API_KEY: ${INCEPTION_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
+      PRESIDIO_URL: http://presidio:5002
+      PRESIDIO_TIMEOUT_MS: ${PRESIDIO_TIMEOUT_MS:-60000}
+      PRESIDIO_API_TOKEN: ${PRESIDIO_API_TOKEN:?Set PRESIDIO_API_TOKEN in .env}
+      FILE_STORAGE_DIR: /app/.data/uploads
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
+      MAX_EXTRACTED_TEXT_CHARS: ${MAX_EXTRACTED_TEXT_CHARS:-200000}
+      MAX_PDF_PAGES: ${MAX_PDF_PAGES:-100}
+      MAX_DOCX_ENTRIES: ${MAX_DOCX_ENTRIES:-1000}
+      MAX_DOCX_UNCOMPRESSED_BYTES: ${MAX_DOCX_UNCOMPRESSED_BYTES:-20971520}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      presidio:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/.data/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+volumes:
+  mongo_data:
+  uploads_data:
+

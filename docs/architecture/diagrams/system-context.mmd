@@ -1,0 +1,14 @@
+flowchart LR
+  Candidate[Candidate] --> SPA[React TypeScript SPA]
+  Coach[Career coach] --> SPA
+  Admin[Administrator] --> SPA
+  SPA -->|HTTPS REST /api/v1| API[Express modular monolith]
+  API --> Mongo[(MongoDB)]
+  API --> Storage[Private file storage]
+  API --> Jobs[MongoDB-backed job runner]
+  Jobs --> Agents[Typed AI agents]
+  Agents --> Provider[LlmProvider adapter]
+  API --> Interview[Interview LangGraph]
+  API --> Review[Review escalation LangGraph]
+  Interview --> Checkpoints[(MongoDB graph checkpoints)]
+  Review --> Checkpoints

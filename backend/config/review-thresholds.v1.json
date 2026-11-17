@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "status": "proposed-defaults-require-coach-calibration",
+  "lowConfidenceThreshold": 0.7,
+  "randomQualitySampleRate": 0.05,
+  "alwaysFlag": [
+    "evidence_not_found_in_source",
+    "fabrication_guardrail_hit",
+    "possible_protected_trait_reference",
+    "candidate_requested_review",
+    "candidate_disputed_result"
+  ],
+  "releasePolicy": {
+    "showBeforeReview": true,
+    "label": "AI-generated, not yet reviewed",
+    "neverRepresentAsCoachApproved": true
+  },
+  "statusValues": [
+    "not_required",
+    "pending_review",
+    "in_review",
+    "approved",
+    "edited",
+    "rejected"
+  ]
+}

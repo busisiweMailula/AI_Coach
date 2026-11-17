@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "status": "proposed-defaults-require-coach-calibration",
+  "label": "Indicative preparation assessment; not a hiring decision",
+  "scale": {
+    "minimum": 0,
+    "maximum": 100
+  },
+  "weights": {
+    "requiredSkillCoverage": 0.5,
+    "preferredSkillCoverage": 0.15,
+    "responsibilityEvidence": 0.15,
+    "experienceAlignment": 0.1,
+    "evidenceQuality": 0.1
+  },
+  "skillEvidenceValues": {
+    "matched": 1,
+    "partial": 0.5,
+    "noEvidenceFound": 0
+  },
+  "missingEvidencePolicy": "No evidence in the resume is not proof that the candidate lacks a skill.",
+  "calculation": "Weighted arithmetic mean of the five normalized components; clamp to [0,100]; round to nearest integer.",
+  "protectedTraitsUsed": false
+}

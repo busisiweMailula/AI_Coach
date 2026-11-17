@@ -1,0 +1,13 @@
+node_modules/
+backend/node_modules/
+backend/dist/
+backend/coverage/
+**/.data/
+**/.venv/
+**/__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+npm-debug.log*
+

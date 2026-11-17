@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "status": "proposed-defaults-require-coach-calibration",
+  "scoreScale": {
+    "minimum": 0,
+    "maximum": 4,
+    "anchors": {
+      "0": "No relevant evidence in the response",
+      "1": "Limited or mostly unsupported response",
+      "2": "Partially addresses the question with gaps",
+      "3": "Clear, relevant response with adequate support",
+      "4": "Specific, complete, well-reasoned response"
+    }
+  },
+  "dimensions": [
+    {
+      "id": "relevance",
+      "weight": 0.2,
+      "description": "Addresses the question and role context."
+    },
+    {
+      "id": "completeness",
+      "weight": 0.2,
+      "description": "Covers the important parts of the response."
+    },
+    {
+      "id": "reasoning",
+      "weight": 0.2,
+      "description": "Explains choices, trade-offs, and outcome where applicable."
+    },
+    {
+      "id": "examples",
+      "weight": 0.2,
+      "description": "Uses concrete examples without inventing candidate history."
+    },
+    {
+      "id": "communication",
+      "weight": 0.2,
+      "description": "Communicates ideas coherently and understandably."
+    }
+  ],
+  "overallCalculation": "Weighted arithmetic mean; display both the 0-4 result and dimension breakdown.",
+  "guardrails": [
+    "Do not infer personality, protected traits, or hiring suitability.",
+    "Do not treat an omitted example as proof the candidate lacks experience.",
+    "Example answers are illustrative coaching aids, never attributed to the candidate."
+  ]
+}
