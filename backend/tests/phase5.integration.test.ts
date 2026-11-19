@@ -4,53 +4,47 @@ import os from "node:os";
 import path from "node:path";
 import type { Express } from "express";
 import JSZip from "jszip";
-import { MongoMemoryServer } from "mongodb-memory-server";
 import { ObjectId } from "mongodb";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-let mongo: MongoMemoryServer;
 let app: Express;
-let database: import("mongodb").Db;
+let database: import("../src/infra/db/json-database.js").JsonDatabase;
 let ownerId: ObjectId;
 let coachId: ObjectId;
 let otherId: ObjectId;
 let ownerToken: string;
 let coachToken: string;
 let otherToken: string;
-let connectMongo: typeof import("../src/infra/db/mongo.js").connectMongo;
-let closeMongo: typeof import("../src/infra/db/mongo.js").closeMongo;
+let connectDatabase: typeof import("../src/infra/db/database.js").connectDatabase;
+let closeDatabase: typeof import("../src/infra/db/database.js").closeDatabase;
 let ensureIndexes: typeof import("../src/infra/db/indexes.js").ensureIndexes;
 let signAccessToken: typeof import("../src/middleware/auth.js").signAccessToken;
-let resetMongoCheckpointer: typeof import("../src/graphs/checkpointer.js").resetMongoCheckpointer;
 let configureResumeAnonymizer: typeof import("../src/modules/privacy/resume-anonymizer.js").configureResumeAnonymizer;
 const storageRoot = path.join(os.tmpdir(), `ai-coach-phase5-${randomUUID()}`);
+const databasePath = path.join(os.tmpdir(), `ai-coach-phase5-${randomUUID()}.json`);
 
 beforeAll(async () => {
   process.env.NODE_ENV = "test";
   process.env.LLM_PROVIDER = "mock";
   process.env.LLM_MODEL = "mock-v1";
-  process.env.MONGODB_DB_NAME = "ai-coach-phase5-test";
+  process.env.JSON_DB_PATH = databasePath;
   process.env.FILE_STORAGE_DIR = storageRoot;
 
-  mongo = await MongoMemoryServer.create();
-  process.env.MONGODB_URI = mongo.getUri();
-  const [mongoModule, indexModule, appModule, authModule, checkpointModule, anonymizerModule] = await Promise.all([
-    import("../src/infra/db/mongo.js"),
+  const [databaseModule, indexModule, appModule, authModule, anonymizerModule] = await Promise.all([
+    import("../src/infra/db/database.js"),
     import("../src/infra/db/indexes.js"),
     import("../src/app.js"),
     import("../src/middleware/auth.js"),
-    import("../src/graphs/checkpointer.js"),
     import("../src/modules/privacy/resume-anonymizer.js"),
   ]);
-  connectMongo = mongoModule.connectMongo;
-  closeMongo = mongoModule.closeMongo;
+  connectDatabase = databaseModule.connectDatabase;
+  closeDatabase = databaseModule.closeDatabase;
   ensureIndexes = indexModule.ensureIndexes;
   signAccessToken = authModule.signAccessToken;
-  resetMongoCheckpointer = checkpointModule.resetMongoCheckpointer;
   configureResumeAnonymizer = anonymizerModule.configureResumeAnonymizer;
   configureResumeAnonymizer({ anonymize: async (text) => text });
-  database = await connectMongo();
+  database = await connectDatabase();
   await ensureIndexes();
   app = appModule.createApp();
 
@@ -66,6 +60,33 @@ beforeEach(async () => {
   await database.dropDatabase();
   await ensureIndexes();
   await rm(storageRoot, { recursive: true, force: true });
+  const now = new Date();
+  for (const user of [
+    {
+      _id: ownerId,
+      email: "owner@example.com",
+      passwordHash: "not-used-in-this-test",
+      role: "candidate",
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: coachId,
+      email: "coach@example.com",
+      passwordHash: "not-used-in-this-test",
+      role: "coach",
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: otherId,
+      email: "other@example.com",
+      passwordHash: "not-used-in-this-test",
+      role: "candidate",
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]) await database.collection("users").insertOne(user);
   await database.collection("consents").insertOne({
     _id: new ObjectId(),
     ownerId,
@@ -79,9 +100,9 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await closeMongo();
-  await mongo.stop();
+  await closeDatabase();
   await rm(storageRoot, { recursive: true, force: true });
+  await rm(databasePath, { force: true });
 });
 
 describe("Phase 5 AI workflows", () => {
@@ -152,6 +173,14 @@ describe("Phase 5 AI workflows", () => {
     expect(queue.status).toBe(200);
     expect(queue.body.data.items).toHaveLength(1);
     const reviewId = queue.body.data.items[0].id as string;
+    const details = await request(app)
+      .get(`/api/v1/reviews/${reviewId}`)
+      .set("Authorization", `Bearer ${coachToken}`);
+    expect(details.status).toBe(200);
+    expect(details.body.data.review.id).toBe(reviewId);
+    expect(details.body.data.target.type).toBe("job_match");
+    expect(details.body.data.target.skillResults[0].evidenceSnippet).toContain("TypeScript");
+
     const decision = await request(app)
       .post(`/api/v1/reviews/${reviewId}/decision`)
       .set("Authorization", `Bearer ${coachToken}`)
@@ -191,7 +220,7 @@ describe("Phase 5 AI workflows", () => {
     expect(failedConsentJob.error.code).toBe("FORBIDDEN");
   });
 
-  it("resumes a checkpointed interview after reconnect and stores rubric evaluation and progress", async () => {
+  it("resumes an in-memory checkpoint after database reconnect and stores rubric evaluation and progress", async () => {
     await grantResumeConsent();
     const { resumeId, jobDescriptionId } = await seedResumeAndDescription("TypeScript backend engineer");
     const generated = await request(app)
@@ -211,9 +240,8 @@ describe("Phase 5 AI workflows", () => {
     const sessionId = started.body.data.id as string;
     expect(started.body.data.currentQuestion).toBeTruthy();
 
-    await closeMongo();
-    resetMongoCheckpointer();
-    database = await connectMongo();
+    await closeDatabase();
+    database = await connectDatabase();
     await ensureIndexes();
 
     const answer = await request(app)

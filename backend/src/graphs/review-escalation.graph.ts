@@ -1,6 +1,6 @@
 import { Annotation, Command, END, START, StateGraph, interrupt } from "@langchain/langgraph";
 import { z } from "zod";
-import { getMongoCheckpointer } from "./checkpointer.js";
+import { getJsonCheckpointer } from "./checkpointer.js";
 
 const ReviewGraphState = Annotation.Root({
   reviewId: Annotation<string>,
@@ -15,7 +15,7 @@ const decisionSchema = z.object({
 });
 
 export async function createReviewEscalationGraph() {
-  const checkpointer = await getMongoCheckpointer();
+  const checkpointer = await getJsonCheckpointer();
   return new StateGraph(ReviewGraphState)
     .addNode("await_coach_decision", async (state) => {
       const decision = decisionSchema.parse(

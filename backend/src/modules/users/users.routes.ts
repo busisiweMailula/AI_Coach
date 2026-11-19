@@ -3,7 +3,7 @@ import { Router } from "express";
 import { NotFoundError, UnauthorizedError } from "../../common/errors.js";
 import { asyncHandler } from "../../common/async-handler.js";
 import { authMiddleware } from "../../middleware/auth.js";
-import { getDb } from "../../infra/db/mongo.js";
+import { getDb } from "../../infra/db/database.js";
 import { publicUser } from "../auth/auth.service.js";
 import type { UserDocument } from "./user.model.js";
 

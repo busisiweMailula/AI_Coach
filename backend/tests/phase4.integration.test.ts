@@ -4,42 +4,37 @@ import os from "node:os";
 import path from "node:path";
 import type { Express } from "express";
 import JSZip from "jszip";
-import { MongoMemoryServer } from "mongodb-memory-server";
 import { ObjectId } from "mongodb";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const storageRoot = path.join(os.tmpdir(), `ai-coach-phase4-${randomUUID()}`);
-let mongo: MongoMemoryServer;
+const databasePath = path.join(os.tmpdir(), `ai-coach-phase4-${randomUUID()}.json`);
 let app: Express;
-let database: import("mongodb").Db;
+let database: import("../src/infra/db/json-database.js").JsonDatabase;
 let candidateToken: string;
 let otherCandidateToken: string;
-let connectMongo: typeof import("../src/infra/db/mongo.js").connectMongo;
-let closeMongo: typeof import("../src/infra/db/mongo.js").closeMongo;
+let connectDatabase: typeof import("../src/infra/db/database.js").connectDatabase;
+let closeDatabase: typeof import("../src/infra/db/database.js").closeDatabase;
 let ensureIndexes: typeof import("../src/infra/db/indexes.js").ensureIndexes;
 let signAccessToken: typeof import("../src/middleware/auth.js").signAccessToken;
 
 beforeAll(async () => {
-  process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/ai-coach-test";
-  process.env.MONGODB_DB_NAME = "ai-coach-phase4-test";
+  process.env.JSON_DB_PATH = databasePath;
   process.env.FILE_STORAGE_DIR = storageRoot;
   process.env.MAX_UPLOAD_BYTES = "2048";
 
-  mongo = await MongoMemoryServer.create();
-  process.env.MONGODB_URI = mongo.getUri();
-
-  const [mongoModule, indexModule, appModule, authModule] = await Promise.all([
-    import("../src/infra/db/mongo.js"),
+  const [databaseModule, indexModule, appModule, authModule] = await Promise.all([
+    import("../src/infra/db/database.js"),
     import("../src/infra/db/indexes.js"),
     import("../src/app.js"),
     import("../src/middleware/auth.js"),
   ]);
-  connectMongo = mongoModule.connectMongo;
-  closeMongo = mongoModule.closeMongo;
+  connectDatabase = databaseModule.connectDatabase;
+  closeDatabase = databaseModule.closeDatabase;
   ensureIndexes = indexModule.ensureIndexes;
   signAccessToken = authModule.signAccessToken;
-  database = await connectMongo();
+  database = await connectDatabase();
   await ensureIndexes();
   app = appModule.createApp();
   candidateToken = signAccessToken({
@@ -61,12 +56,96 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await closeMongo();
-  await mongo.stop();
+  await closeDatabase();
   await rm(storageRoot, { recursive: true, force: true });
+  await rm(databasePath, { force: true });
 });
 
 describe("Phase 4 intake APIs", () => {
+  it("allows candidates to register and then sign in", async () => {
+    const email = `candidate-${randomUUID()}@example.com`;
+    const password = "candidate-password-123";
+    const registration = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email, password });
+
+    expect(registration.status).toBe(201);
+    expect(registration.body.data.user).toMatchObject({ email, role: "candidate" });
+    expect(registration.body.data.user.passwordHash).toBeUndefined();
+
+    const login = await request(app)
+      .post("/api/v1/auth/login")
+      .send({ email, password });
+    expect(login.status).toBe(200);
+    expect(login.body.data.accessToken).toBeTruthy();
+  });
+
+  it("limits admin account management and rejects stale coach tokens after a role change", async () => {
+    const adminId = new ObjectId("65f0c0a3f6b8a7b123456786");
+    const now = new Date();
+    for (const user of [
+      {
+        _id: adminId,
+        email: "admin@example.com",
+        passwordHash: "not-used-in-this-test",
+        role: "admin",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        _id: new ObjectId("65f0c0a3f6b8a7b123456789"),
+        email: "candidate@example.com",
+        passwordHash: "not-used-in-this-test",
+        role: "candidate",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]) await database.collection("users").insertOne(user);
+    const adminToken = signAccessToken({
+      userId: adminId.toHexString(),
+      email: "admin@example.com",
+      role: "admin",
+    });
+
+    const list = await request(app)
+      .get("/api/v1/admin/users")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(list.status).toBe(200);
+    expect(list.body.data.users).toHaveLength(2);
+    expect(list.body.data.users[0].passwordHash).toBeUndefined();
+
+    const changed = await request(app)
+      .patch("/api/v1/admin/users/65f0c0a3f6b8a7b123456789/role")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ role: "coach" });
+    expect(changed.status).toBe(200);
+    expect(changed.body.data.user.role).toBe("coach");
+
+    const coachToken = signAccessToken({
+      userId: "65f0c0a3f6b8a7b123456789",
+      email: "candidate@example.com",
+      role: "coach",
+    });
+    expect((await request(app)
+      .get("/api/v1/reviews/pending")
+      .set("Authorization", `Bearer ${coachToken}`)).status).toBe(200);
+
+    await request(app)
+      .patch("/api/v1/admin/users/65f0c0a3f6b8a7b123456789/role")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ role: "candidate" });
+    expect((await request(app)
+      .get("/api/v1/reviews/pending")
+      .set("Authorization", `Bearer ${coachToken}`)).status).toBe(403);
+
+    const cannotProvisionAdmin = await request(app)
+      .patch("/api/v1/admin/users/65f0c0a3f6b8a7b123456789/role")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ role: "admin" });
+    expect(cannotProvisionAdmin.status).toBe(400);
+    expect(await database.collection("audit_logs").countDocuments({ action: "user_role_changed" })).toBe(2);
+  });
+
   it("requires explicit consent and only allows the owner to read or edit an uploaded resume", async () => {
     const docx = await createDocx("Built secure APIs and automated document processing.");
     const missingConsent = await request(app)
@@ -226,7 +305,7 @@ describe("Phase 4 intake APIs", () => {
 
   it("fails closed when stored consent cannot be retrieved", async () => {
     await recordResumeConsent();
-    await closeMongo();
+    await closeDatabase();
     const upload = await request(app)
       .post("/api/v1/resumes/upload")
       .set("Authorization", `Bearer ${candidateToken}`)
@@ -237,7 +316,7 @@ describe("Phase 4 intake APIs", () => {
     expect(upload.status).toBe(500);
     expect(upload.body.error.code).toBe("INTERNAL_ERROR");
 
-    database = await connectMongo();
+    database = await connectDatabase();
     await ensureIndexes();
   });
 

@@ -1,13 +1,13 @@
 # LangGraph Workflow Design
 
-Status: Phase 2 design; implementation is Phase 5. Confirm LangGraph.js and the exact MongoDB checkpointer package/version against current documentation before implementation.
+Status: Design and implementation. The backend uses LangGraph.js with an in-memory checkpointer for now; checkpoints are lost when the API restarts. Durable MongoDB-backed recovery is planned for a later migration.
 
 ## Design principles
 
 - LangGraph orchestrates only workflows with a loop, durable pause, or human decision.
 - Services remain responsible for authentication, ownership, persistence, and business invariants.
 - Graph state carries IDs, indices, versions, and status; resume/answer contents stay in their domain collections.
-- Every graph has a stable `thread_id` and durable checkpoints.
+- Every graph has a stable `thread_id`; current checkpoints persist only for the lifetime of the process.
 - Graph nodes do not bypass application-service authorization or directly expose checkpoint content.
 
 ## Mock interview graph
@@ -97,12 +97,12 @@ Coach identity is not accepted from request body or graph input. Authentication 
 
 ## Checkpointing, durability, and privacy
 
-- Use the supported MongoDB checkpointer package selected during Phase 5 implementation.
+- Current implementation uses LangGraph's in-memory `MemorySaver`; it is not durable across API restarts.
 - `thread_id` is the interview session ID or review item ID; each checkpoint is associated with owner/workflow metadata.
 - Store IDs/state only; do not duplicate resume text, answer text, prompts, tokens, or provider secrets.
-- Checkpoint writes follow successful source-record writes; operations are idempotent and recoverable after process restart.
+- Checkpoint writes follow successful source-record writes; operations are idempotent within the running process.
 - Use an explicit checkpoint retention policy and delete checkpoints when linked data expires.
-- Checkpointer collection/index behavior and transaction requirements must be verified against the chosen package.
+- A future MongoDB checkpointer migration must validate collection/index behavior, retention, and transaction requirements.
 
 ## Failure behavior
 

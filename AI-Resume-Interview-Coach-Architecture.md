@@ -27,6 +27,8 @@
 
 **Hard rule:** the system never fabricates experience, credentials or achievements.
 
+**Current implementation note (2026-11-19):** The API currently persists application collections to a local JSON file and keeps graph checkpoints in process memory. This is temporary for development; MongoDB is planned for a later migration. See [Database Design](docs/architecture/Database-Design.md) for the active storage format and limitations.
+
 ## 1.2 Roles
 
 | Role | Type | Responsibilities |

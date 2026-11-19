@@ -8,7 +8,7 @@ sequenceDiagram
   participant API as Express API
   participant S as Resume service
   participant F as Private storage
-  participant DB as MongoDB
+  participant DB as JSON data file
   participant W as Job worker
   participant P as Parser agent/provider
   C->>API: consent + multipart PDF/DOCX
@@ -42,7 +42,7 @@ sequenceDiagram
   participant API as API
   participant S as Interview service
   participant G as Interview graph
-  participant DB as MongoDB
+  participant DB as JSON data file
   C->>API: POST /interviews
   API->>S: create session after ownership check
   S->>G: invoke with thread_id=sessionId

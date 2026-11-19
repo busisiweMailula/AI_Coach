@@ -1,36 +1,12 @@
-import { MongoDBSaver } from "@langchain/langgraph-checkpoint-mongodb";
-import { env } from "../config/env.js";
-import { getMongoClient } from "../infra/db/mongo.js";
+import { MemorySaver } from "@langchain/langgraph";
 
-let saver: MongoDBSaver | undefined;
-let setupPromise: Promise<MongoDBSaver> | undefined;
+let saver: MemorySaver | undefined;
 
-export async function getMongoCheckpointer(): Promise<MongoDBSaver> {
-  if (saver) return saver;
-  if (!setupPromise) {
-    setupPromise = (async () => {
-      const nextSaver = new MongoDBSaver({
-        client: getMongoClient(),
-        dbName: env.MONGODB_DB_NAME,
-        ttl: 30 * 24 * 60 * 60,
-        enableTimestamps: true,
-      });
-      const errors = await nextSaver.setup();
-      if (errors.length > 0) throw new AggregateError(errors, "Failed to initialize graph checkpoints");
-      saver = nextSaver;
-      return nextSaver;
-    })();
-  }
-
-  try {
-    return await setupPromise;
-  } catch (error) {
-    setupPromise = undefined;
-    throw error;
-  }
+export async function getJsonCheckpointer(): Promise<MemorySaver> {
+  if (!saver) saver = new MemorySaver();
+  return saver;
 }
 
-export function resetMongoCheckpointer(): void {
+export function resetJsonCheckpointer(): void {
   saver = undefined;
-  setupPromise = undefined;
 }

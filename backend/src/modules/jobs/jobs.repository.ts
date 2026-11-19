@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { NotFoundError } from "../../common/errors.js";
 import { logger } from "../../config/logger.js";
-import { getDb } from "../../infra/db/mongo.js";
+import { getDb } from "../../infra/db/database.js";
 import type { AsyncJobDocument } from "../../infra/jobs/job.model.js";
 import type { JobDescriptionDocument } from "./job-description.model.js";
 

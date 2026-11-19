@@ -7,6 +7,7 @@ import { requestIdMiddleware } from "./middleware/request-id.js";
 import { requestLogger } from "./middleware/request-logger.js";
 import { env } from "./config/env.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
+import { adminRouter } from "./modules/users/admin.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { interviewsRouter } from "./modules/interviews/interviews.routes.js";
 import { jobsRouter } from "./modules/jobs/jobs.routes.js";
@@ -29,6 +30,7 @@ export function createApp() {
 
   app.use("/api/v1/health", healthRouter);
   app.use("/api/v1/auth", authRouter);
+  app.use("/api/v1/admin", adminRouter);
   app.use("/api/v1/users", usersRouter);
   app.use("/api/v1/candidates/me", privacyRouter);
   app.use("/api/v1/resumes", resumesRouter);

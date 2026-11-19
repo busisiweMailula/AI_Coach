@@ -60,12 +60,14 @@ export default function ResumeUploadPage({
           return;
         }
         if (result.status === "failed") {
-          const anonymizationUnavailable = result.error?.code === "SERVICE_UNAVAILABLE";
+          const failureCode = result.error?.code;
           setNotice({
-            message: anonymizationUnavailable
-              ? "CV uploaded and stored. AI parsing was blocked because CV anonymisation is not configured; the original CV was not sent to an AI service."
-              : "CV uploaded, but parsing did not complete. You can retry later.",
-            isError: anonymizationUnavailable,
+            message: failureCode === "SERVICE_UNAVAILABLE"
+              ? "CV uploaded and stored. Parsing was blocked because the local CV anonymisation service is unavailable; the original CV was not sent to an AI service."
+              : failureCode === "AI_SERVICE_ERROR"
+                ? "CV uploaded and stored, but the AI returned a result the parser could not use. The parsing instructions have been corrected; please upload the CV again to retry."
+                : "CV uploaded, but parsing did not complete. You can retry by uploading the CV again.",
+            isError: true,
           });
           return;
         }

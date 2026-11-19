@@ -5,14 +5,15 @@
 | Component | Owns | Calls | Must not |
 |---|---|---|---|
 | Auth middleware | JWT validation and request identity | User/auth configuration | Accept caller-supplied identity |
-| Routes/controllers | HTTP transport and status codes | Services, validators | Query MongoDB or call an LLM |
+| Routes/controllers | HTTP transport and status codes | Services, validators | Query the persistence adapter or call an LLM |
 | Application services | Use-case orchestration and ownership | Repositories, domain, agents, jobs | Leak cross-user data |
-| Domain | Score calculation, evidence and language rules, rubric aggregation | Pure typed inputs | Import Express, MongoDB, or provider SDKs |
-| Repositories | MongoDB persistence | MongoDB driver | Call agents or make authorization decisions without owner criteria |
+| Domain | Score calculation, evidence and language rules, rubric aggregation | Pure typed inputs | Import Express, persistence, or provider SDKs |
+| Repositories | JSON-file persistence for now | JSON database adapter | Call agents or make authorization decisions without owner criteria |
 | Storage adapter | Private original/derived files | Filesystem or approved object storage | Serve uploads as public static files |
 | Job runner | Queue/status/retry lifecycle | Services/agents, job repository | Treat transient failure as success |
 | Agent runtime | Prompt/provider/schema/execution lifecycle | `LlmProvider`, execution repository | Access domain repositories directly |
 | LLM provider adapter | Provider-specific request/response | Vendor SDK/API | Expose API keys to browser or log prompt secrets |
+| Embedding and vector retrieval | Embed anonymized resume chunks and retrieve owner-scoped evidence | Mistral API and local cosine ranking | Send raw resume text or query another candidate's vectors |
 | Interview graph | Interview state transitions and pause/resume | Interview services, evaluator agent, checkpointer | Own HTTP semantics or duplicate answer records |
 | Review graph | Review escalation and coach interrupt | Review service, audit repository, checkpointer | Approve itself or bypass role/ownership guards |
 
@@ -39,7 +40,7 @@ interface FileStorage {
 }
 ```
 
-These are design contracts, not implementations. Provider SDK, storage backend, and exact LangGraph checkpointer packages are verified when their implementation phase begins.
+These are design contracts; the backend implementations live under `backend/src/infra/`, `backend/src/agents/`, and `backend/src/graphs/`. Provider-specific live behavior still requires configured credentials and integration validation.
 
 ## Cross-cutting behavior
 
@@ -52,4 +53,4 @@ These are design contracts, not implementations. Provider SDK, storage backend, 
 
 ## Error behavior
 
-Expected domain failures use typed errors and documented HTTP codes. Unexpected errors are logged with a request ID and return a generic `500` response. Provider, MongoDB, and file-storage errors do not disclose stack traces or credentials.
+Expected domain failures use typed errors and documented HTTP codes. Unexpected errors are logged with a request ID and return a generic `500` response. Provider, JSON-file, and file-storage errors do not disclose stack traces or credentials.

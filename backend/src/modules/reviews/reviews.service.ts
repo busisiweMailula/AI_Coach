@@ -3,9 +3,16 @@ import { z } from "zod";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../common/errors.js";
-import { getDb } from "../../infra/db/mongo.js";
+import { getDb } from "../../infra/db/database.js";
 import { startReviewGraph, resumeReviewGraph } from "../../graphs/review-escalation.graph.js";
-import type { ReviewItemDocument } from "../ai-results/models.js";
+import type {
+  InterviewAnswerDocument,
+  InterviewEvaluationDocument,
+  InterviewQuestionDocument,
+  JobMatchDocument,
+  ResumeSuggestionDocument,
+  ReviewItemDocument,
+} from "../ai-results/models.js";
 
 const reviewConfigPath = fileURLToPath(new URL("../../../config/review-thresholds.v1.json", import.meta.url));
 const reviewDecisionSchema = z.object({
@@ -137,6 +144,85 @@ export async function getReviewItem(
   }
   if (actorRole === "admin") throw new ForbiddenError("Administrators cannot access candidate review content");
   return item;
+}
+
+export async function getCoachReviewDetails(
+  id: string,
+  coachId: string,
+): Promise<{
+  review: ReturnType<typeof toReviewResponse>;
+  target:
+    | ({ type: "job_match" } & Pick<JobMatchDocument, "score" | "scoreBreakdown" | "skillResults" | "disclaimer">)
+    | ({ type: "resume_suggestion" } & Pick<ResumeSuggestionDocument, "originalText" | "proposedText" | "reason" | "sourceSnippet">)
+    | ({ type: "interview_evaluation" }
+      & Pick<InterviewEvaluationDocument, "overallScore" | "dimensions" | "strengths" | "improvements" | "exampleAnswer" | "confidence">
+      & { answers: Array<{ question: string; answer: string }> });
+}> {
+  const item = await getReviewItem(id, coachId, "coach");
+  if (item.status !== "pending_review" && item.status !== "in_review") {
+    throw new ConflictError("Review item is no longer pending");
+  }
+
+  if (item.targetType === "job_match") {
+    const target = await getDb().collection<JobMatchDocument>("job_matches")
+      .findOne({ _id: item.targetId, ownerId: item.ownerId });
+    if (!target) throw new NotFoundError("Review target not found");
+    return {
+      review: toReviewResponse(item),
+      target: {
+        type: "job_match",
+        score: target.score,
+        scoreBreakdown: target.scoreBreakdown,
+        skillResults: target.skillResults,
+        disclaimer: target.disclaimer,
+      },
+    };
+  }
+  if (item.targetType === "resume_suggestion") {
+    const target = await getDb().collection<ResumeSuggestionDocument>("resume_suggestions")
+      .findOne({ _id: item.targetId, ownerId: item.ownerId });
+    if (!target) throw new NotFoundError("Review target not found");
+    return {
+      review: toReviewResponse(item),
+      target: {
+        type: "resume_suggestion",
+        originalText: target.originalText,
+        proposedText: target.proposedText,
+        reason: target.reason,
+        sourceSnippet: target.sourceSnippet,
+      },
+    };
+  }
+
+  const evaluation = await getDb().collection<InterviewEvaluationDocument>("interview_evaluations")
+    .findOne({ _id: item.targetId, ownerId: item.ownerId });
+  if (!evaluation) throw new NotFoundError("Review target not found");
+  const answers = await getDb().collection<InterviewAnswerDocument>("interview_answers")
+    .find({ ownerId: item.ownerId, sessionId: evaluation.sessionId })
+    .sort({ questionIndex: 1 })
+    .toArray();
+  const questions = await getDb().collection<InterviewQuestionDocument>("interview_questions")
+    .find({ _id: { $in: answers.map((answer) => answer.questionId) }, ownerId: item.ownerId })
+    .toArray();
+  const questionsById = new Map(questions.map((question) => [question._id.toHexString(), question.prompt]));
+  const answerDetails = answers.map((answer) => {
+    const question = questionsById.get(answer.questionId.toHexString());
+    if (!question) throw new NotFoundError("Review question not found");
+    return { question, answer: answer.answerText };
+  });
+  return {
+    review: toReviewResponse(item),
+    target: {
+      type: "interview_evaluation",
+      overallScore: evaluation.overallScore,
+      dimensions: evaluation.dimensions,
+      strengths: evaluation.strengths,
+      improvements: evaluation.improvements,
+      exampleAnswer: evaluation.exampleAnswer,
+      confidence: evaluation.confidence,
+      answers: answerDetails,
+    },
+  };
 }
 
 export async function decideReview(input: {

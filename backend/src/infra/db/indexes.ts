@@ -1,4 +1,4 @@
-import { getDb } from "./mongo.js";
+import { getDb } from "./database.js";
 import type { UserDocument } from "../../modules/users/user.model.js";
 import type { ResumeDocument } from "../../modules/resumes/resume.model.js";
 import type { ConsentDocument } from "../../modules/privacy/consent.model.js";
@@ -95,6 +95,10 @@ export async function ensureIndexes(): Promise<void> {
   await db.collection<CandidateProgressDocument>("candidate_progress").createIndex(
     { ownerId: 1 },
     { unique: true, name: "candidate_progress_owner_unique" },
+  );
+  await db.collection("resume_vector_chunks").createIndex(
+    { ownerId: 1, resumeId: 1, chunkIndex: 1 },
+    { unique: true, name: "resume_vector_chunks_owner_resume_chunk_unique" },
   );
 }
 

@@ -1,14 +1,15 @@
 # Database Design
 
-Status: Phase 2 logical design with Phase 5 implementation notes. The backend implements the listed AI workflow collections and a subset of indexes; confirm retention periods and deployment-specific TTL behavior before production.
+Status: The current implementation stores collection-shaped JSON in `.data/ai-coach.json`; MongoDB is a planned later migration. This local file store is temporary, single-process, unencrypted, and not suitable for production. Confirm retention periods and deployment-specific behavior before production.
 
 ## Conventions
 
-- IDs and references use BSON `ObjectId`; timestamps use BSON `Date`.
+- Runtime IDs and references use `ObjectId`; timestamps use `Date`. The JSON file encodes these as tagged objects (`{"$oid":"..."}` and `{"$date":"..."}`) so they can be restored to their runtime types.
+- The file is a top-level object whose properties are collection names and whose values are arrays of documents. `JSON_DB_PATH` selects the file path.
 - Candidate-owned documents carry `ownerId: ObjectId`; candidate-facing repository operations filter by both `_id` and `ownerId`.
 - Application enums are validated at the service boundary and stored as strings.
 - Optional values are omitted or explicitly `null` consistently within a collection.
-- `sourceText`, resumes, answer bodies, and provider inputs are sensitive personal data. Encrypt storage/transport, restrict access, and exclude from logs.
+- `sourceText`, resumes, answer bodies, and provider inputs are sensitive personal data. The current JSON file is not encrypted; restrict access to the file and backups, and exclude sensitive values from logs.
 - TTL values below are proposed defaults, not legal retention advice. User deletion cascades to owned content and files. Audit retention is separately justified and never retains raw candidate content.
 - Resume-processing consent is versioned by the server and stored as append-only records. Upload and CV-based AI jobs require a current grant. CV text is sent to the private Presidio service before model processing; jobs fail closed if anonymization fails, and only the service's returned text may be sent to a model. Presidio detection is not guaranteed to find all personal information.
 
@@ -72,6 +73,16 @@ Sample:
 ```
 
 Retention: remove source file and metadata on user deletion or configured expiry; purge backups according to backup policy.
+
+### `resume_vector_chunks`
+
+Anonymized resume excerpts and Mistral vectors used for semantic evidence retrieval.
+
+Implemented fields: `_id:ObjectId`; `ownerId:ObjectId`; `resumeId:ObjectId`; `chunkIndex:number`; `content:string` (Presidio-processed text only); `embedding:number[]` (1024 dimensions for `mistral-embed`); `embeddingModel:string`; `createdAt:Date`; `updatedAt:Date`.
+
+The JSON adapter enforces unique `{ownerId:1,resumeId:1,chunkIndex:1}` and ranks the selected owner's resume chunks in-process using cosine similarity over the stored vectors. MongoDB Atlas Vector Search is a possible future replacement.
+
+Ownership/access: vector queries pre-filter by both `ownerId` and `resumeId`; these records are never returned directly by candidate-facing endpoints. Current implementation upserts chunks during matching; account/resume deletion and vector cleanup remain follow-up work.
 
 ### `parsed_resume_data`
 
@@ -313,7 +324,7 @@ Retention: retain decision metadata with the target; delete candidate content wi
 
 ### `jobs`
 
-MongoDB-backed asynchronous work status.
+JSON-file-backed asynchronous work status.
 
 Implemented fields: `_id:ObjectId`; `ownerId:ObjectId`; `type:string`; `status:"queued"|"running"|"succeeded"|"failed"|"cancelled"`; `progress:number`; `attempt:number`; optional `payload:object<string,string>`; `resultType:string|null`; `resultId:ObjectId|null`; `safeErrorCode:string|null`; `createdAt:Date`; `updatedAt:Date`. Idempotency and expiry fields are not currently implemented.
 
@@ -328,9 +339,9 @@ Sample:
 
 Retention: proposed 30 days after terminal state; expiresAt is assigned only after success/failure/cancellation.
 
-### `langgraph_checkpoints` (proposed)
+### `langgraph_checkpoints` (future MongoDB migration)
 
-Durable interrupt/resume state for graph workflows.
+The current implementation keeps LangGraph checkpoints in process memory; they are lost when the API restarts. This is a proposed future durable collection for a MongoDB migration.
 
 Fields: `_id:ObjectId`; `threadId:string`; `checkpointId:string`; `workflow:"mock_interview"|"review_escalation"`; `ownerId:ObjectId`; `state:object` containing IDs, indices, and status only; `createdAt:Date`; `expiresAt:Date|null`.
 

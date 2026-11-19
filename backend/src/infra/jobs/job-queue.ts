@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
-import { getDb } from "../db/mongo.js";
+import { getDb } from "../db/database.js";
 import type { AsyncJobDocument } from "./job.model.js";
 import { processAgentJob } from "./agent-job-processor.js";
 

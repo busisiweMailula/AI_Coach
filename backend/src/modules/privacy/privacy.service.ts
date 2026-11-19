@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import { ForbiddenError } from "../../common/errors.js";
-import { getDb } from "../../infra/db/mongo.js";
+import { getDb } from "../../infra/db/database.js";
 import {
   CONSENT_POLICY_VERSIONS,
   CONSENT_PURPOSES,

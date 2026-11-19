@@ -5,9 +5,9 @@ import urllib.error
 import urllib.request
 from types import SimpleNamespace
 from http.server import ThreadingHTTPServer
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from app import anonymize_text, create_handler
+from app import anonymize_text, configure_logging, create_handler
 
 
 class AnonymizeTextTests(unittest.TestCase):
@@ -25,6 +25,13 @@ class AnonymizeTextTests(unittest.TestCase):
             text="Jane Doe works here",
             analyzer_results=["detected entity"],
         )
+
+    def test_logging_level_is_case_insensitive_and_ignores_surrounding_whitespace(self) -> None:
+        with patch.dict("os.environ", {"LOG_LEVEL": " info "}):
+            with patch("app.logging.basicConfig") as basic_config:
+                configure_logging()
+
+        basic_config.assert_called_once_with(level="INFO")
 
     def test_http_endpoint_requires_token_and_returns_anonymized_text(self) -> None:
         analyzer = Mock()

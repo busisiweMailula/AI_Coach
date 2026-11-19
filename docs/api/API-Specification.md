@@ -10,7 +10,7 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 - Error response: `{ "success": false, "error": { "code": "...", "message": "...", "details"?: ... }, "requestId": "..." }`.
 - Candidate-owned resources are scoped to the authenticated user. Unauthorized cross-owner access does not reveal whether the resource exists.
 - Long-running analysis, generation, and evaluation return `202 Accepted` with a job ID; poll `/jobs/status/{jobId}`. Resume text extraction occurs during upload; structured parsing and AI workflows run asynchronously. AI workflows require a configured provider and active `external_model_processing` consent.
-- `GET /candidates/me/consents/status` returns the server's current policy versions and whether the authenticated candidate accepted them. `PUT /candidates/me/consents` accepts only `purpose` and `granted`; the server chooses the policy version and appends a history record. Upload consent is checked from MongoDB before multipart parsing; a multipart consent flag is not accepted.
+- `GET /candidates/me/consents/status` returns the server's current policy versions and whether the authenticated candidate accepted them. `PUT /candidates/me/consents` accepts only `purpose` and `granted`; the server chooses the policy version and appends a history record. Upload consent is checked from the local JSON data file before multipart parsing; a multipart consent flag is not accepted.
 - Scores are indicative coaching feedback, not hiring decisions. Every match skill result includes evidence or is labeled `no_evidence_found`.
 
 ## Endpoint catalog
@@ -50,13 +50,16 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `GET /candidates/me/export` | Candidate | Request/download own data export |
 | `DELETE /candidates/me/data` | Candidate | Start deletion and return job status |
 | `POST /reviews/request` | Candidate owner | Request coach review of own output |
-| `GET /reviews/pending` | Coach | List assigned/eligible pending reviews |
-| `GET /reviews/{reviewId}` | Assigned coach or candidate owner (status-limited) | Get review payload according to role |
+| `GET /reviews/pending` | Coach | List pending reviews; coach role is checked against the current account |
+| `GET /reviews/{reviewId}` | Assigned coach or candidate owner (status-limited) | Candidate receives status metadata; coach receives owner-scoped content for review |
 | `POST /reviews/{reviewId}/decision` | Assigned coach | Approve/edit/reject with reason |
-| `GET /admin/users` | Admin | List user metadata, not candidate content |
+| `GET /admin/users` | Admin | List up to 200 safe account records, not candidate content |
+| `PATCH /admin/users/{userId}/role` | Admin | Change candidate/coach roles; admin accounts require manual provisioning |
 | `GET /admin/config` | Admin | Read active non-secret configuration |
 | `PATCH /admin/config` | Admin | Update validated versioned thresholds/config |
 | `GET /admin/audit-logs` | Admin | Read restricted audit metadata |
+
+Admin and coach endpoints re-check the account role against the JSON database for each privileged request, so role changes take effect without waiting for the access token to expire. Role changes are recorded in the audit log.
 
 ## Async job response
 

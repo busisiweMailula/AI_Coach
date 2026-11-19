@@ -1,7 +1,7 @@
 import { Annotation, Command, END, START, StateGraph, interrupt } from "@langchain/langgraph";
 import { z } from "zod";
 import { ConflictError } from "../common/errors.js";
-import { getMongoCheckpointer } from "./checkpointer.js";
+import { getJsonCheckpointer } from "./checkpointer.js";
 
 const InterviewGraphState = Annotation.Root({
   sessionId: Annotation<string>,
@@ -22,7 +22,7 @@ const answerCommandSchema = z.discriminatedUnion("kind", [
 ]);
 
 export async function createMockInterviewGraph() {
-  const checkpointer = await getMongoCheckpointer();
+  const checkpointer = await getJsonCheckpointer();
   return new StateGraph(InterviewGraphState)
     .addNode("await_candidate_answer", async (state) => {
       const command = answerCommandSchema.parse(

@@ -6,11 +6,11 @@
 |---|---|---|
 | React SPA | Candidate, coach, and administrator experience; calls only the API | 6 |
 | Express API | Modular monolith, authentication, validation, use cases, and REST responses | 3 onward |
-| MongoDB | Users, candidate data, records, async job state, audit metadata, and graph checkpoints | 3 onward |
-| Private file storage | Original uploads and derived artifacts; storage key only in MongoDB | 4 |
+| JSON data file | Users, candidate data, records, async job state, and audit metadata | Temporary local-development implementation |
+| Private file storage | Original uploads and derived artifacts; storage key only in the JSON data file | 4 |
 | LLM provider | Configured external provider behind a backend adapter | 5 |
 
-The local development stack is API + MongoDB. Production topology, managed database, object storage, secrets manager, and model provider are deployment decisions rather than hard-coded dependencies.
+The current local stack is API + JSON file + private file storage. JSON persistence is single-process, unencrypted, and temporary; migrate to MongoDB before production. Production topology, managed database, object storage, secrets manager, and model provider are deployment decisions rather than hard-coded dependencies.
 
 ## Component view
 
@@ -20,9 +20,9 @@ flowchart TB
   API --> SVC[Application services]
   SVC --> DOMAIN[Domain rules and guardrails]
   SVC --> REPO[Repositories]
-  REPO --> DB[(MongoDB)]
+  REPO --> DB[(Local JSON file)]
   SVC --> STORAGE[Private storage adapter]
-  SVC --> JOBS[MongoDB-backed job runner]
+  SVC --> JOBS[JSON-backed job runner]
   JOBS --> AGENTS[Typed linear agents]
   SVC --> AGENTS
   AGENTS --> LLM[LlmProvider]
@@ -56,12 +56,12 @@ The interview graph checkpoints between questions and answers. The review graph 
 
 ## Availability and failure handling
 
-- API startup requires MongoDB connectivity and index initialization.
+- - API startup requires a readable JSON file and local unique-index initialization.
 - Long-running AI tasks return a job identifier; failure state is explicit and pollable.
 - Provider errors/timeouts are recorded without returning secrets or raw stack traces.
-- Graph interruptions are durable and resumable.
+- Graph interruptions are resumable only while the API process remains running.
 - A database or provider outage must not return success-shaped placeholder output.
 
 ## Scaling and deployment
 
-The initial deployment is a single API process with MongoDB and private storage. A separate worker process can be split out later without changing domain contracts. No microservices or external queue are required for the initial capstone.
+The temporary deployment is a single API process with a JSON data file and private storage. Do not run multiple API processes against the same JSON file. A MongoDB adapter should replace this store before adding multi-process workers or production deployment.

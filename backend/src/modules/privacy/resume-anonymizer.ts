@@ -1,11 +1,12 @@
 import { ServiceUnavailableError, UpstreamServiceError } from "../../common/errors.js";
+import { createPresidioResumeAnonymizer } from "./presidio-anonymizer.js";
 import { ensureResumeConsent } from "./privacy.service.js";
 
 export interface ResumeAnonymizer {
   anonymize(resumeText: string): Promise<string>;
 }
 
-let resumeAnonymizer: ResumeAnonymizer | undefined;
+let resumeAnonymizer: ResumeAnonymizer | undefined = createPresidioResumeAnonymizer();
 
 export function configureResumeAnonymizer(anonymizer: ResumeAnonymizer | undefined): void {
   resumeAnonymizer = anonymizer;

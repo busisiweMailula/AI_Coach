@@ -1,17 +1,4 @@
 services:
-  mongo:
-    image: mongo:7
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   presidio:
     build:
       context: ./presidio-service
@@ -37,10 +24,13 @@ services:
       PORT: 4000
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      MONGODB_URI: mongodb://mongo:27017/ai-coach
-      MONGODB_DB_NAME: ai-coach
+      JSON_DB_PATH: /app/.data/ai-coach.json
       LLM_PROVIDER: ${LLM_PROVIDER:-inception}
       LLM_MODEL: ${LLM_MODEL:-mercury-3}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-mistral}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_EMBEDDING_MODEL: ${MISTRAL_EMBEDDING_MODEL:-mistral-embed}
+      EMBEDDING_TIMEOUT_MS: ${EMBEDDING_TIMEOUT_MS:-30000}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       INCEPTION_API_KEY: ${INCEPTION_API_KEY:-}
@@ -61,12 +51,10 @@ services:
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
     depends_on:
-      mongo:
-        condition: service_healthy
       presidio:
         condition: service_healthy
     volumes:
-      - uploads_data:/app/.data/uploads
+      - app_data:/app/.data
 
   frontend:
     build:
@@ -78,6 +66,5 @@ services:
       - api
 
 volumes:
-  mongo_data:
-  uploads_data:
+  app_data:
 

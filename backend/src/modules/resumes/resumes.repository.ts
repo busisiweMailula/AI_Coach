@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import { NotFoundError } from "../../common/errors.js";
-import { getDb } from "../../infra/db/mongo.js";
+import { getDb } from "../../infra/db/database.js";
 import type { ResumeDocument, ResumeMetadataUpdate } from "./resume.model.js";
 
 const collectionName = "resumes";

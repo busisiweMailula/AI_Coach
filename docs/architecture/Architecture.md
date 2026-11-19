@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phase 2 design draft. The user approved proceeding with this phase; instructor review of proposed scoring values and unresolved operational decisions remains outstanding.
+Status: Phase 2 design with core backend workflows implemented. Instructor review of proposed scoring values and unresolved operational decisions remains outstanding.
 
 ## Purpose and scope
 
@@ -17,7 +17,7 @@ The system helps a candidate prepare for a career opportunity by parsing a resum
 | AD-05 | Enforce schema, evidence, fabrication, protected-trait, and language checks in code. | Adopted |
 | AD-06 | Use plain services for linear AI tasks; reserve LangGraph for resumable interviews and coach-review pauses. | Proposed for instructor confirmation |
 | AD-07 | Isolate provider-specific APIs behind `LlmProvider`; support provider/model selection through server configuration. | Adopted; provider choice pending |
-| AD-08 | Persist long-running work in MongoDB and expose job status polling. | Proposed |
+| AD-08 | Persist long-running work in a local JSON file and expose job status polling. | Temporary implementation; MongoDB migration is planned |
 | AD-09 | Show AI results promptly with an explicit unreviewed label; coach review is asynchronous. | Proposed |
 | AD-10 | Version prompts, score weights, rubrics, and thresholds. | Adopted |
 | AD-11 | Public registration creates candidates only. Coach/admin accounts require controlled provisioning. | Adopted for the design |
@@ -31,7 +31,9 @@ flowchart LR
   Coach[Career coach] --> Web
   Admin[Administrator] --> Web
   Web -->|HTTPS REST /api/v1| API[Express modular monolith]
-  API --> Mongo[(MongoDB)]
+  API --> JSON[(Local JSON data file)]
+  API -->|Mistral embeddings| Embedder[Mistral embedding API]
+  API -->|local cosine ranking| JSON
   API --> Files[Private file storage]
   API --> Provider[Configured LLM provider adapter]
   API --> Reviewer[Coach review workflow]
@@ -44,10 +46,10 @@ The browser never receives database credentials or LLM provider keys. Only backe
 1. **Routes/controllers** authenticate, validate, and translate HTTP requests/responses.
 2. **Application services** enforce use-case orchestration and ownership.
 3. **Domain** contains pure scoring, rubric, evidence, and guardrail logic.
-4. **Repositories** own MongoDB queries and indexes.
+4. **Repositories** use the JSON persistence adapter; a MongoDB adapter is planned later.
 5. **Agents** perform one bounded, typed AI task and cannot access repositories.
 6. **Graphs** orchestrate only workflows that pause or loop.
-7. **Infrastructure** provides MongoDB, private storage, LLM providers, logging, and job execution.
+7. **Infrastructure** provides JSON persistence, private storage, LLM providers, logging, and job execution.
 
 Dependencies point inward. Domain modules do not import Express, MongoDB, or provider SDKs.
 
@@ -57,6 +59,7 @@ Dependencies point inward. Domain modules do not import Express, MongoDB, or pro
 - Every candidate-owned document has an `ownerId`; repository queries include it.
 - Uploaded files are private, size limited, MIME-sniffed, and stored outside a public web root.
 - External model calls are server-side, versioned, and subject to consent and provider data-processing review.
+- Resume text is anonymized by Presidio before Mistral embedding calls; retrieved evidence is filtered by candidate and resume IDs.
 - AI output remains attributable to its source, prompt/config version, provider, and review state.
 
 ## Decisions still requiring confirmation
@@ -69,4 +72,4 @@ Dependencies point inward. Domain modules do not import Express, MongoDB, or pro
 
 ## Relationship to the current scaffold
 
-The current Phase 3 code implements the backend foundation and current-user/auth routes only. It does not yet implement the resume, job, matching, agent, or graph modules described here. The seven-day JWT default is a scaffold setting; before production, set a short-lived access token policy and document refresh/revocation behavior.
+The backend implements authentication, consent, resume and job-description intake, queued AI workflows, human review, and interview graphs. For now, application data uses a local JSON file, semantic matching uses Mistral embeddings with local cosine ranking, and graph checkpoints remain in memory. MongoDB is planned for a later migration. Coach/admin provisioning, export/deletion workflows, refresh-token revocation, and production deployment validation remain follow-up work. The seven-day JWT default is not a production access-token policy.

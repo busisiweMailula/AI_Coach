@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { ObjectId } from "mongodb";
 import type { AsyncJobDocument } from "../../infra/jobs/job.model.js";
-import { getDb } from "../../infra/db/mongo.js";
+import { getDb } from "../../infra/db/database.js";
 import { env } from "../../config/env.js";
 import { scheduleAgentJob } from "../../infra/jobs/job-queue.js";
 import { logger } from "../../config/logger.js";

@@ -2,15 +2,12 @@ import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { ensureIndexes } from "./infra/db/indexes.js";
-import { closeMongo, connectMongo } from "./infra/db/mongo.js";
+import { closeDatabase, connectDatabase } from "./infra/db/database.js";
 import { resumeQueuedAgentJobs } from "./infra/jobs/job-queue.js";
-import { configureResumeAnonymizer } from "./modules/privacy/resume-anonymizer.js";
-import { createPresidioResumeAnonymizer } from "./modules/privacy/presidio-anonymizer.js";
 
 async function start(): Promise<void> {
-  await connectMongo();
+  await connectDatabase();
   await ensureIndexes();
-  configureResumeAnonymizer(createPresidioResumeAnonymizer());
   await resumeQueuedAgentJobs();
 
   const app = createApp();
@@ -21,7 +18,7 @@ async function start(): Promise<void> {
   const shutdown = (signal: string) => {
     logger.info({ signal }, "Shutting down");
     server.close((error) => {
-      void closeMongo().then(() => {
+      void closeDatabase().then(() => {
         if (error) {
           logger.error({ err: error }, "HTTP server shutdown failed");
           process.exitCode = 1;
@@ -36,7 +33,7 @@ async function start(): Promise<void> {
 
 start().catch(async (error: unknown) => {
   logger.fatal({ err: error }, "Failed to start API server");
-  await closeMongo();
+  await closeDatabase();
   process.exitCode = 1;
 });
 

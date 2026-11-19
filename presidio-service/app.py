@@ -38,6 +38,11 @@ def anonymize_text(text: str, analyzer: Any, anonymizer: Any) -> str:
     return result.text
 
 
+def configure_logging() -> None:
+    level = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+    logging.basicConfig(level=level)
+
+
 def create_handler(
     analyzer: AnalyzerEngine,
     anonymizer: AnonymizerEngine,
@@ -130,7 +135,7 @@ def create_handler(
 
 
 def main() -> None:
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+    configure_logging()
     host = os.environ.get("PRESIDIO_HOST", "127.0.0.1")
     port = int(os.environ.get("PRESIDIO_PORT", "5002"))
     api_token = os.environ.get("PRESIDIO_API_TOKEN", "")

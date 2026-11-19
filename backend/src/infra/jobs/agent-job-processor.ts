@@ -16,7 +16,7 @@ import { evidenceExists, normalize } from "../../guardrails/evidence.js";
 import { checkFabrication } from "../../guardrails/fabrication.js";
 import { findLanguageGuardrailHits, mentionsProtectedTraits } from "../../guardrails/language.js";
 import { calculateMatchScore, scoreForEvidence } from "../../guardrails/scoring.js";
-import { getDb } from "../db/mongo.js";
+import { getDb } from "../db/database.js";
 import { prepareResumeTextForAI } from "../../modules/privacy/resume-anonymizer.js";
 import type { AsyncJobDocument } from "./job.model.js";
 import type { JobDescriptionDocument } from "../../modules/jobs/job-description.model.js";
@@ -34,6 +34,8 @@ import type {
   SkillGapDocument,
 } from "../../modules/ai-results/models.js";
 import { createReviewItem, shouldEscalate } from "../../modules/reviews/reviews.service.js";
+import { ensureExternalModelConsent } from "../../modules/privacy/privacy.service.js";
+import { findRelevantResumeEvidence } from "../embeddings/resume-semantic-search.js";
 
 const jobs = () => getDb().collection<AsyncJobDocument>("jobs");
 const resumes = () => getDb().collection<ResumeDocument>("resumes");
@@ -179,6 +181,17 @@ async function analyzeMatch(job: AsyncJobDocument): Promise<{ type: string; id: 
     job.ownerId.toHexString(),
     resume.extractedText,
   );
+  if (env.EMBEDDING_PROVIDER === "mistral") {
+    await ensureExternalModelConsent(job.ownerId);
+  }
+  const relevantResumeEvidence = env.EMBEDDING_PROVIDER === "mistral"
+    ? await findRelevantResumeEvidence({
+        ownerId: job.ownerId,
+        resumeId,
+        anonymizedResumeText,
+        queryText: buildMatchQuery(description),
+      })
+    : [];
   const requestedSkills = [
     ...(description.requiredSkills ?? []),
     ...(description.preferredSkills ?? []),
@@ -189,6 +202,7 @@ async function analyzeMatch(job: AsyncJobDocument): Promise<{ type: string; id: 
     promptVersion: "skill-gap-analyzer-v1",
     input: {
       resumeText: anonymizedResumeText,
+      relevantResumeEvidence,
       requiredSkills: description.requiredSkills ?? [],
       preferredSkills: description.preferredSkills ?? [],
     },
@@ -281,6 +295,16 @@ async function analyzeMatch(job: AsyncJobDocument): Promise<{ type: string; id: 
     });
   }
   return { type: "job_match", id: matchId };
+}
+
+function buildMatchQuery(description: JobDescriptionDocument): string {
+  const requirements = [
+    description.roleTitle,
+    ...(description.requiredSkills ?? []).map((item) => `${item.name}: ${item.evidenceSnippet}`),
+    ...(description.preferredSkills ?? []).map((item) => `${item.name}: ${item.evidenceSnippet}`),
+    ...(description.responsibilities ?? []).map((item) => `${item.text}: ${item.evidenceSnippet}`),
+  ].filter((item): item is string => Boolean(item?.trim()));
+  return requirements.join("\n") || description.normalizedText;
 }
 
 async function createSuggestions(job: AsyncJobDocument): Promise<{ type: string; id: ObjectId }> {

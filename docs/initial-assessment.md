@@ -1,8 +1,18 @@
 # Initial Repository Assessment
 
-Assessment date: 2026-11-16
+Historical assessment date: 2026-11-16
 
-## Current state
+## Update (2026-11-19)
+
+The backend has since grown beyond the Phase 3 scaffold described below. It now includes resume and job-description intake, consent handling, queued AI workflows, LLM integrations, guardrails, review workflows, interview graphs, and owner-scoped API routes. Application data currently uses a local JSON file, semantic resume evidence retrieval uses Mistral embeddings with local cosine ranking, and graph checkpoints remain in process memory. MongoDB is planned as a later migration.
+
+The JSON file is a temporary, unencrypted, single-process development store and is not suitable for production. Semantic retrieval requires a Mistral key and external-model consent. Production concerns such as privileged-account provisioning, short-lived/revocable tokens, data export/deletion, durable graph checkpoints, and end-to-end/AI evaluation are still outstanding.
+
+Current validation: `npm test` and `npm run build` pass. Docker Compose validation was unavailable because the Docker CLI is not installed in the environment.
+
+The sections below preserve the original assessment snapshot from 2026-11-16.
+
+## State at the historical assessment date
 
 The repository is a greenfield application scaffold. Its original project artifact is `AI-Resume-Interview-Coach-Architecture.md`. A Phase 3 backend foundation now exists under `backend/`; Phase 4 domain APIs, a frontend, and AI workflows have not been implemented.
 

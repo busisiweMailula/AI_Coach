@@ -17,13 +17,13 @@ modules/<domain>/
 - Routes apply authentication, role guards, and Zod validation.
 - Controllers are limited to HTTP mapping.
 - Services enforce ownership, invoke domain rules/agents, and coordinate persistence.
-- Repositories contain MongoDB operations and always scope candidate data by `ownerId`.
+- Repositories use the temporary JSON persistence adapter and always scope candidate data by `ownerId`; MongoDB will replace this adapter later.
 - Domain functions are pure wherever practical.
 - Agents accept typed input and return schema-validated output; they have no database dependency.
 
 ## Persistence conventions
 
-- MongoDB `ObjectId` is used for document IDs and references.
+- `ObjectId` is used for document IDs and references and is encoded as tagged JSON on disk.
 - Timestamps are BSON `Date` values in storage and ISO-8601 strings in JSON.
 - Candidate-owned documents use `ownerId: ObjectId`.
 - Email values are normalized to lowercase and uniquely indexed.
@@ -37,7 +37,7 @@ modules/<domain>/
 - Error envelope: `{ "success": false, "error": { "code": "...", "message": "...", "details"?: ... }, "requestId": "..." }`.
 - `400` means invalid input, `401` missing/invalid authentication, `403` insufficient role, `404` absent/inaccessible resource, `409` invalid state/conflict, `413` oversized upload, `415` unsupported file, `429` rate limit, and `500` unexpected server failure.
 - Long tasks return `202 Accepted` and a job ID; the client polls `GET /jobs/status/{jobId}`.
-- Pagination uses opaque cursor tokens; do not expose arbitrary Mongo query syntax.
+- Pagination uses opaque cursor tokens; do not expose arbitrary persistence query syntax.
 
 ## Identity and authorization
 

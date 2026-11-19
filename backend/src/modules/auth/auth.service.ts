@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { ConflictError, UnauthorizedError } from "../../common/errors.js";
-import { getDb } from "../../infra/db/mongo.js";
+import { getDb } from "../../infra/db/database.js";
 import { signAccessToken } from "../../middleware/auth.js";
 import type { UserDocument } from "../users/user.model.js";
 

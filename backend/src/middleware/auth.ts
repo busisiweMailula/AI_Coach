@@ -1,9 +1,11 @@
 import type { RequestHandler } from "express";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { z } from "zod";
+import { ObjectId } from "mongodb";
 import { env } from "../config/env.js";
 import { ForbiddenError, UnauthorizedError } from "../common/errors.js";
-import type { UserRole } from "../modules/users/user.model.js";
+import { getDb } from "../infra/db/database.js";
+import type { UserDocument, UserRole } from "../modules/users/user.model.js";
 
 export interface AuthContext {
   userId: string;
@@ -65,6 +67,25 @@ export function requireRole(...roles: UserRole[]): RequestHandler {
       return next(new ForbiddenError("Insufficient role permissions"));
     }
     next();
+  };
+}
+
+export function requireCurrentRole(...roles: UserRole[]): RequestHandler {
+  return (req, _res, next) => {
+    if (!req.auth) return next(new UnauthorizedError());
+    if (!roles.includes(req.auth.role) || !ObjectId.isValid(req.auth.userId)) {
+      return next(new ForbiddenError("Insufficient role permissions"));
+    }
+
+    void getDb().collection<UserDocument>("users")
+      .findOne({ _id: new ObjectId(req.auth.userId) })
+      .then((user) => {
+        if (!user || user.role !== req.auth?.role || !roles.includes(user.role)) {
+          next(new ForbiddenError("Your account role changed. Sign in again."));
+          return;
+        }
+        next();
+      }, next);
   };
 }
 

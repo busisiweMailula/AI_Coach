@@ -4,25 +4,30 @@ import {
   ApiError,
   getConsentStatus,
   login,
+  registerCandidate,
   recordConsent,
   type ConsentPurpose,
   type ConsentStatus,
+  type UserRole,
 } from "../api/client";
 import ConsentPage from "../features/privacy/ConsentPage";
 import PrivacyPolicyPage from "../features/privacy/PrivacyPolicyPage";
 import LoginPage from "../features/auth/LoginPage";
-import ResumeUploadPage from "../features/resume/ResumeUploadPage";
+import CandidateWorkspace from "../features/resume/CandidateWorkspace";
+import CoachReviewPage from "../features/reviews/CoachReviewPage";
+import AdminAccountsPage from "../features/users/AdminAccountsPage";
 
 type ConsentViewState = "loading" | "error" | "required" | "accepted";
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState<UserRole | null>(null);
   const [consentState, setConsentState] = useState<ConsentViewState>("loading");
   const [consentError, setConsentError] = useState("");
 
   useEffect(() => {
-    if (!token) {
+    if (!token || role !== "candidate") {
       setConsentState("loading");
       setConsentError("");
       return;
@@ -42,7 +47,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, role]);
 
   async function refreshConsent(currentToken = token) {
     if (!currentToken) return;
@@ -80,7 +85,10 @@ export default function App() {
   function signOut() {
     setToken(null);
     setEmail("");
+    setRole(null);
   }
+
+  const isCandidateWorkspace = Boolean(token && role === "candidate" && consentState === "accepted");
 
   return (
     <Routes>
@@ -88,23 +96,41 @@ export default function App() {
       <Route
         path="*"
         element={(
-          <main className="shell">
-            <header className="site-header">
-              <Link className="brand" to="/" aria-label="CV Matching Agent home">CV Matching Agent</Link>
-              <div className="header-actions">
-                <span className="secure-label">Private candidate workspace</span>
-                {token && <button className="text-button" type="button" onClick={signOut}>Sign out</button>}
-              </div>
-            </header>
+          <div className={`shell${isCandidateWorkspace ? " shell-candidate" : ""}`}>
+            {!isCandidateWorkspace && (
+              <header className="site-header">
+                <Link className="brand" to="/" aria-label="CV Matching Agent home">CV Matching Agent</Link>
+                <div className="header-actions">
+                  <span className="secure-label">
+                    {role === "coach" ? "Coach review portal" : role === "admin" ? "Admin account portal" : "Private candidate workspace"}
+                  </span>
+                  {token && <button className="text-button" type="button" onClick={signOut}>Sign out</button>}
+                </div>
+              </header>
+            )}
 
             {!token ? (
               <LoginPage
+                onRegister={async (userEmail, password) => {
+                  await registerCandidate(userEmail, password);
+                }}
                 onLogin={async (userEmail, password) => {
                   const result = await login(userEmail, password);
                   setEmail(result.user.email);
+                  setRole(result.user.role);
                   setToken(result.accessToken);
                 }}
               />
+            ) : role === "coach" ? (
+              <CoachReviewPage token={token} />
+            ) : role === "admin" ? (
+              <AdminAccountsPage token={token} />
+            ) : role !== "candidate" ? (
+              <section className="card narrow" role="alert">
+                <p className="eyebrow">Account access unavailable</p>
+                <h1>Sign in again</h1>
+                <p className="intro">We could not determine your account role. Sign out and sign in again to continue.</p>
+              </section>
             ) : consentState === "loading" ? (
               <section className="card narrow" aria-live="polite">
                 <p className="eyebrow">Verifying privacy consent</p>
@@ -126,14 +152,15 @@ export default function App() {
                 onAgree={() => updateConsent(true)}
               />
             ) : (
-              <ResumeUploadPage
+              <CandidateWorkspace
                 token={token}
                 email={email}
                 onWithdraw={() => updateConsent(false)}
                 onConsentRejected={() => refreshConsent().catch(() => undefined)}
+                onSignOut={signOut}
               />
             )}
-          </main>
+          </div>
         )}
       />
     </Routes>

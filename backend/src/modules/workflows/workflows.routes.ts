@@ -5,7 +5,7 @@ import { asyncHandler } from "../../common/async-handler.js";
 import { ConflictError, NotFoundError, UnauthorizedError } from "../../common/errors.js";
 import { getLlmProvider } from "../../infra/llm/provider-factory.js";
 import { enqueueAgentJob } from "../../infra/jobs/job-queue.js";
-import { getDb } from "../../infra/db/mongo.js";
+import { getDb } from "../../infra/db/database.js";
 import { authMiddleware, requireRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
 import type {

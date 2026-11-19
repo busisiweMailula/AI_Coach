@@ -1,0 +1,408 @@
+{
+  "info": {
+    "_postman_id": "4b5a2c31-8e7d-4c65-9785-74e0bd7d1c29",
+    "name": "AI Resume and Interview Coach API",
+    "description": "Requests for the implemented backend and local Presidio service. Start the API and Presidio first. Run Register Candidate, then Login Candidate; the login request stores accessToken. Candidate AI requests need a configured provider and accepted external-model consent. Set coachToken and adminToken manually for role-protected folders. The resume and job file-upload requests require selecting a local file in Postman.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    { "key": "backendUrl", "value": "http://localhost:4000" },
+    { "key": "apiBaseUrl", "value": "{{backendUrl}}/api/v1" },
+    { "key": "presidioUrl", "value": "http://127.0.0.1:5002" },
+    { "key": "presidioToken", "value": "" },
+    { "key": "candidateEmail", "value": "candidate@example.test" },
+    { "key": "password", "value": "ChangeThisPassword123!" },
+    { "key": "accessToken", "value": "" },
+    { "key": "coachToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "candidateUserId", "value": "" },
+    { "key": "resumeId", "value": "" },
+    { "key": "jobDescriptionId", "value": "" },
+    { "key": "jobId", "value": "" },
+    { "key": "matchId", "value": "" },
+    { "key": "gapId", "value": "" },
+    { "key": "suggestionId", "value": "" },
+    { "key": "questionSetId", "value": "" },
+    { "key": "interviewId", "value": "" },
+    { "key": "questionIndex", "value": "0" },
+    { "key": "reviewId", "value": "" },
+    { "key": "userId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health and authentication",
+      "item": [
+        {
+          "name": "API health",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{apiBaseUrl}}/health"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('API is healthy', function () {", "  pm.response.to.have.status(200);", "  pm.expect(pm.response.json().data.status).to.eql('ok');", "});"] } }]
+        },
+        {
+          "name": "Register candidate",
+          "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('candidateEmail', pm.variables.replaceIn('{{$randomEmail}}'));"] } }],
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{candidateEmail}}\",\n  \"password\": \"{{password}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/auth/register",
+            "description": "Creates a candidate account. Re-running this request generates a new test email."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Candidate account created', function () {", "  pm.response.to.have.status(201);", "  pm.collectionVariables.set('candidateUserId', pm.response.json().data.user.id);", "});"] } }]
+        },
+        {
+          "name": "Login candidate",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{candidateEmail}}\",\n  \"password\": \"{{password}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/auth/login"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Login succeeded and token saved', function () {", "  pm.response.to.have.status(200);", "  const data = pm.response.json().data;", "  pm.collectionVariables.set('accessToken', data.accessToken);", "  pm.collectionVariables.set('candidateUserId', data.user.id);", "});"] } }]
+        },
+        {
+          "name": "Get current user",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/users/me" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Current user returned', function () { pm.response.to.have.status(200); });"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Privacy and consent",
+      "item": [
+        {
+          "name": "Get consent status",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/candidates/me/consents/status" }
+        },
+        {
+          "name": "List consent records",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/candidates/me/consents" }
+        },
+        {
+          "name": "Grant resume processing consent",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"purpose\": \"resume_processing\",\n  \"granted\": true\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/candidates/me/consents"
+          }
+        },
+        {
+          "name": "Grant external model processing consent",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"purpose\": \"external_model_processing\",\n  \"granted\": true\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/candidates/me/consents"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resumes",
+      "item": [
+        {
+          "name": "Upload resume (select file)",
+          "request": {
+            "method": "POST",
+            "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": "" }] },
+            "url": "{{apiBaseUrl}}/resumes/upload",
+            "description": "In Postman, choose a PDF or DOCX file for the file form field. Requires resume_processing consent."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Resume uploaded', function () {", "  pm.response.to.have.status(201);", "  pm.collectionVariables.set('resumeId', pm.response.json().data.resume.id);", "});"] } }]
+        },
+        {
+          "name": "List resumes",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/resumes" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Resume list returned', function () {", "  pm.response.to.have.status(200);", "  const items = pm.response.json().data.items;", "  if (items.length) pm.collectionVariables.set('resumeId', items[0].id);", "});"] } }]
+        },
+        {
+          "name": "Get resume",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/resumes/{{resumeId}}" }
+        },
+        {
+          "name": "Update resume metadata",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Backend Engineer CV\",\n  \"notes\": \"Postman test update\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/resumes/{{resumeId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Job descriptions",
+      "item": [
+        {
+          "name": "Create from pasted text",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"text\": \"Senior backend engineer to build secure APIs, maintain MongoDB services, improve reliability, and automate deployments. Experience with TypeScript, Node.js, and cloud infrastructure is preferred.\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/jobs/analyze",
+            "description": "Uses JSON for pasted text. This must not be sent as multipart form data."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Job description accepted', function () {", "  pm.response.to.have.status(202);", "  const data = pm.response.json().data;", "  pm.collectionVariables.set('jobId', data.jobId);", "  pm.collectionVariables.set('jobDescriptionId', data.jobDescriptionId);", "});"] } }]
+        },
+        {
+          "name": "Create from file (select file)",
+          "request": {
+            "method": "POST",
+            "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": "" }] },
+            "url": "{{apiBaseUrl}}/jobs/analyze",
+            "description": "In Postman, choose a PDF, DOCX, or TXT file for the file form field."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Job description file accepted', function () {", "  pm.response.to.have.status(202);", "  const data = pm.response.json().data;", "  pm.collectionVariables.set('jobId', data.jobId);", "  pm.collectionVariables.set('jobDescriptionId', data.jobDescriptionId);", "});"] } }]
+        },
+        {
+          "name": "List job descriptions",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/jobs" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Job description list returned', function () {", "  pm.response.to.have.status(200);", "  const items = pm.response.json().data.items;", "  if (items.length) pm.collectionVariables.set('jobDescriptionId', items[0].id);", "});"] } }]
+        },
+        {
+          "name": "Get job description",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/jobs/{{jobDescriptionId}}" }
+        },
+        {
+          "name": "Get job processing status",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/jobs/status/{{jobId}}" }
+        }
+      ]
+    },
+    {
+      "name": "Match, skill gaps, and resume suggestions",
+      "item": [
+        {
+          "name": "Start match analysis",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resumeId\": \"{{resumeId}}\",\n  \"jobDescriptionId\": \"{{jobDescriptionId}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/matching/analyze",
+            "description": "Before sending, create a resume and a job description in this account or run Resumes / List resumes and Job descriptions / List job descriptions to populate their IDs. Both variables must be 24-character MongoDB ObjectIds. Poll the returned jobId using Jobs / Get job processing status. Requires configured AI and consent."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Match job queued', function () {", "  pm.response.to.have.status(202);", "  const data = pm.response.json().data;", "  pm.collectionVariables.set('jobId', data.jobId);", "  if (data.resultId) pm.collectionVariables.set('matchId', data.resultId);", "});"] } }]
+        },
+        {
+          "name": "Get match result",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/matches/{{matchId}}" }
+        },
+        {
+          "name": "Start skill gap analysis",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resumeId\": \"{{resumeId}}\",\n  \"jobDescriptionId\": \"{{jobDescriptionId}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/skills/gaps"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Skill gap job queued', function () {", "  pm.response.to.have.status(202);", "  const data = pm.response.json().data;", "  pm.collectionVariables.set('jobId', data.jobId);", "  if (data.resultId) pm.collectionVariables.set('gapId', data.resultId);", "});"] } }]
+        },
+        {
+          "name": "Get skill gap result",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/skills/gaps/{{gapId}}" }
+        },
+        {
+          "name": "Start resume optimization",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resumeId\": \"{{resumeId}}\",\n  \"jobDescriptionId\": \"{{jobDescriptionId}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/resumes/optimize",
+            "description": "Poll the returned jobId, then list suggestions."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Optimization job queued', function () {", "  pm.response.to.have.status(202);", "  const data = pm.response.json().data;", "  pm.collectionVariables.set('jobId', data.jobId);", "  if (data.resultId) pm.collectionVariables.set('suggestionId', data.resultId);", "});"] } }]
+        },
+        {
+          "name": "List resume suggestions",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/suggestions" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["if (pm.response.code === 200) {", "  const items = pm.response.json().data.items;", "  if (items.length) pm.collectionVariables.set('suggestionId', items[0].id);", "}"] } }]
+        },
+        {
+          "name": "Accept resume suggestion",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"decision\": \"accept\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/suggestions/{{suggestionId}}/decision"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Interview preparation",
+      "item": [
+        {
+          "name": "Generate question set",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"jobDescriptionId\": \"{{jobDescriptionId}}\",\n  \"resumeId\": \"{{resumeId}}\",\n  \"questionCount\": 5\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/interviews/generate"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Question generation queued', function () {", "  pm.response.to.have.status(202);", "  const data = pm.response.json().data;", "  pm.collectionVariables.set('jobId', data.jobId);", "  if (data.resultId) pm.collectionVariables.set('questionSetId', data.resultId);", "});"] } }]
+        },
+        {
+          "name": "Get question set",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/interviews/question-sets/{{questionSetId}}" }
+        },
+        {
+          "name": "Start mock interview",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"questionSetId\": \"{{questionSetId}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/interviews"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Interview started', function () {", "  pm.response.to.have.status(201);", "  const data = pm.response.json().data;", "  pm.collectionVariables.set('interviewId', data.id);", "  if (data.currentQuestion) pm.collectionVariables.set('questionIndex', String(data.currentQuestion.index));", "});"] } }]
+        },
+        {
+          "name": "Get interview session",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/interviews/{{interviewId}}" }
+        },
+        {
+          "name": "Submit current answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"answerText\": \"I would clarify the API requirements, define the data model, add validation and tests, then monitor the deployment.\",\n  \"questionIndex\": {{questionIndex}}\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/interviews/{{interviewId}}/answer",
+            "description": "Update questionIndex from the returned nextQuestion.index before submitting subsequent answers."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Answer submitted', function () { pm.response.to.have.status(200); });", "if (pm.response.code === 200) {", "  const question = pm.response.json().data.nextQuestion;", "  if (question) pm.collectionVariables.set('questionIndex', String(question.index));", "}"] } }]
+        },
+        {
+          "name": "Evaluate interview",
+          "request": { "method": "POST", "url": "{{apiBaseUrl}}/interviews/{{interviewId}}/evaluate" }
+        },
+        {
+          "name": "Get interview results",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/interviews/{{interviewId}}/results" }
+        },
+        {
+          "name": "Get candidate progress",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/candidates/me/progress" }
+        }
+      ]
+    },
+    {
+      "name": "Candidate review requests",
+      "item": [
+        {
+          "name": "Request review of match",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"targetType\": \"job_match\",\n  \"targetId\": \"{{matchId}}\",\n  \"reason\": \"Please review the match evidence and score.\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/reviews/request",
+            "description": "Requires a completed match result. Change targetType and targetId to review a resume suggestion or interview evaluation instead."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Review request created', function () {", "  pm.response.to.have.status(201);", "  pm.collectionVariables.set('reviewId', pm.response.json().data.id);", "});"] } }]
+        },
+        {
+          "name": "Get my review request",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/reviews/{{reviewId}}" }
+        }
+      ]
+    },
+    {
+      "name": "Coach review (set coachToken first)",
+      "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{coachToken}}", "type": "string" }] },
+      "item": [
+        {
+          "name": "List pending reviews",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/reviews/pending" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["if (pm.response.code === 200) {", "  const items = pm.response.json().data.items;", "  if (items.length) pm.collectionVariables.set('reviewId', items[0].id);", "}"] } }]
+        },
+        {
+          "name": "Get review details",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/reviews/{{reviewId}}" }
+        },
+        {
+          "name": "Approve review",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"decision\": \"approve\",\n  \"reason\": \"Reviewed source evidence and confirmed the recommendation is supported.\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/reviews/{{reviewId}}/decision"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin (set adminToken first)",
+      "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+      "item": [
+        {
+          "name": "List users",
+          "request": { "method": "GET", "url": "{{apiBaseUrl}}/admin/users" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["if (pm.response.code === 200) {", "  const users = pm.response.json().data.users;", "  const candidate = users.find(function (user) { return user.role === 'candidate'; });", "  if (candidate) pm.collectionVariables.set('userId', candidate.id);", "}"] } }]
+        },
+        {
+          "name": "Change user role",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"role\": \"coach\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/admin/users/{{userId}}/role",
+            "description": "Use only in a test environment; change role back to candidate as needed."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Presidio service",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "Presidio health",
+          "request": { "method": "GET", "url": "{{presidioUrl}}/health" }
+        },
+        {
+          "name": "Anonymize sample text",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{presidioToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"text\": \"Jane Example can be reached at jane@example.test.\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{presidioUrl}}/anonymize",
+            "description": "Set presidioToken to the PRESIDIO_API_TOKEN used to start the service. In loopback-only mode with no token configured, remove the Authorization header."
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Request returned a successful status', function () {",
+          "  pm.expect(pm.response.code).to.be.within(200, 299);",
+          "});"
+        ]
+      }
+    }
+  ]
+}

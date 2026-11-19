@@ -36,7 +36,7 @@ export default function ConsentPage({ onAgree }: ConsentPageProps) {
         <section>
           <h2>Data storage</h2>
           <p>
-            Uploaded CV files are kept in private server-side storage, while CV information and matching results may be stored in MongoDB for the purposes described in our{" "}
+            Uploaded CV files are kept in private server-side storage, while CV information and matching results are stored in a local JSON data file for the purposes described in our{" "}
             <Link to="/privacy-policy" target="_blank" rel="noreferrer">Privacy Policy</Link>. The application does not itself guarantee encryption at rest.
           </p>
         </section>
