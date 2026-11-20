@@ -18,6 +18,7 @@ import {
   getMatch,
   getQuestionSet,
   getResume,
+  getResumeDraft,
   getResumes,
   getResumeSuggestions,
   getSkillGaps,
@@ -644,6 +645,7 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
   const [resumeId, setResumeId] = useState(resumes[0]?.id ?? "");
   const [jobId, setJobId] = useState(jobs[0]?.id ?? "");
   const [suggestions, setSuggestions] = useState<ResumeSuggestion[]>([]);
+  const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
 
@@ -669,6 +671,7 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
       await waitForJob(token, accepted.jobId);
       const result = await getResumeSuggestions(token);
       setSuggestions(result.items);
+      setDraft(null);
       setNotice({ text: "Resume suggestions are ready for review.", error: false });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
@@ -683,6 +686,7 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
     try {
       const updated = await decideSuggestion(token, id, decision);
       setSuggestions((current) => current.map((item) => item.id === id ? updated : item));
+      setDraft(null);
       setNotice({ text: `Suggestion ${decision === "accept" ? "accepted" : "rejected"}.`, error: false });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
@@ -691,22 +695,60 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
     }
   }
 
+  async function generateDraft() {
+    if (!resumeId || !jobId) {
+      setNotice({ text: "Select both a CV and a job description.", error: true });
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await getResumeDraft(token, resumeId, jobId);
+      setDraft(result.content);
+      setNotice({
+        text: `${result.appliedSuggestionIds.length} accepted suggestion${result.appliedSuggestionIds.length === 1 ? "" : "s"} applied to the CV draft.`,
+        error: false,
+      });
+    } catch (error) {
+      setNotice({ text: errorMessage(error), error: true });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function downloadDraft() {
+    if (draft === null) return;
+    const selectedResume = resumes.find((resume) => resume.id === resumeId);
+    const baseName = (selectedResume?.title || selectedResume?.originalFileName || "resume")
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^\w.-]+/g, "_");
+    const url = URL.createObjectURL(new Blob([draft], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${baseName}-draft.txt`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  const visibleSuggestions = suggestions.filter((suggestion) =>
+    suggestion.resumeId === resumeId && suggestion.jobDescriptionId === jobId);
+
   return (
     <div className="workspace-panel">
       <h2>Resume improvement studio</h2>
       <div className="selector-grid">
-        <label>CV<select value={resumeId} onChange={(event) => setResumeId(event.target.value)}>
+        <label>CV<select value={resumeId} onChange={(event) => { setResumeId(event.target.value); setDraft(null); }}>
           <option value="">Select CV</option>{resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.title || resume.originalFileName}</option>)}
         </select></label>
-        <label>Job description<select value={jobId} onChange={(event) => setJobId(event.target.value)}>
+        <label>Job description<select value={jobId} onChange={(event) => { setJobId(event.target.value); setDraft(null); }}>
           <option value="">Select job</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.roleTitle || `Job ${job.id.slice(-6)}`}</option>)}
         </select></label>
         <button className="primary" type="button" disabled={busy} onClick={() => void generate()}>{busy ? "Generating…" : "Generate suggestions"}</button>
       </div>
       {notice && <p className={`notice${notice.error ? " error" : ""}`}>{notice.text}</p>}
-      {suggestions.length === 0 ? <p className="supporting-copy">No resume suggestions yet.</p> : (
+      {visibleSuggestions.length === 0 ? <p className="supporting-copy">No resume suggestions yet for this CV.</p> : (
         <div className="suggestion-list">
-          {suggestions.map((suggestion) => (
+          {visibleSuggestions.map((suggestion) => (
             <article className="suggestion-card" key={suggestion.id}>
               <div className="comparison">
                 <section><h3>Original</h3><blockquote>{suggestion.originalText}</blockquote></section>
@@ -724,6 +766,17 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
           ))}
         </div>
       )}
+      <section className="result-section">
+        <h3>CV draft</h3>
+        <p className="supporting-copy">Only accepted suggestions for this CV are applied. Pending and rejected suggestions are left out.</p>
+        <div className="actions">
+          <button className="secondary" type="button" disabled={busy || !resumeId || !jobId} onClick={() => void generateDraft()}>
+            {busy ? "Preparing…" : "Generate CV draft"}
+          </button>
+          {draft !== null && <button className="secondary" type="button" onClick={downloadDraft}>Download draft</button>}
+        </div>
+        {draft !== null && <pre className="source-preview">{draft}</pre>}
+      </section>
     </div>
   );
 }

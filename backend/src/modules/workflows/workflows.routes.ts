@@ -2,12 +2,14 @@ import { ObjectId } from "mongodb";
 import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../common/async-handler.js";
-import { ConflictError, NotFoundError, UnauthorizedError } from "../../common/errors.js";
+import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from "../../common/errors.js";
 import { getLlmProvider } from "../../infra/llm/provider-factory.js";
 import { enqueueAgentJob } from "../../infra/jobs/job-queue.js";
 import { getDb } from "../../infra/db/database.js";
 import { authMiddleware, requireRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
+import { prepareResumeTextForAI } from "../privacy/resume-anonymizer.js";
+import { buildResumeDraft } from "../resumes/resume-draft.js";
 import type {
   CandidateProgressDocument,
   JobMatchDocument,
@@ -142,6 +144,50 @@ workflowsRouter.post(
       payload: req.body,
     });
     res.status(202).json({ success: true, data: acceptedJob(job._id, job.resultId) });
+  }),
+);
+
+workflowsRouter.get(
+  "/resumes/:resumeId/draft",
+  ...candidateOnly,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw new UnauthorizedError();
+    const query = z.object({
+      jobDescriptionId: z.string().regex(/^[\da-f]{24}$/i),
+    }).strict().safeParse(req.query);
+    if (!query.success) throw new ValidationError("Request validation failed", query.error.flatten());
+
+    const ownerId = new ObjectId(req.auth.userId);
+    const resume = await getDb().collection<ResumeDocument>("resumes").findOne({
+      _id: parseId(req.params.resumeId),
+      ownerId,
+    });
+    if (!resume) throw new NotFoundError("Resume not found");
+    const jobDescriptionId = parseId(query.data.jobDescriptionId);
+    const description = await getDb().collection<JobDescriptionDocument>("job_descriptions").findOne({
+      _id: jobDescriptionId,
+      ownerId,
+    });
+    if (!description) throw new NotFoundError("Job description not found");
+
+    const suggestions = await getDb().collection<ResumeSuggestionDocument>("resume_suggestions")
+      .find({ ownerId, resumeId: resume._id, jobDescriptionId, status: "accepted" })
+      .sort({ createdAt: 1, _id: 1 })
+      .toArray();
+    const anonymizedText = suggestions.length > 0
+      ? await prepareResumeTextForAI(ownerId.toHexString(), resume.extractedText)
+      : resume.extractedText;
+    const content = buildResumeDraft(resume.extractedText, anonymizedText, suggestions);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        resumeId: resume._id.toHexString(),
+        jobDescriptionId: description._id.toHexString(),
+        content,
+        appliedSuggestionIds: suggestions.map((suggestion) => suggestion._id.toHexString()),
+      },
+    });
   }),
 );
 
@@ -335,6 +381,7 @@ function suggestionResponse(item: ResumeSuggestionDocument) {
   return {
     id: item._id.toHexString(),
     resumeId: item.resumeId.toHexString(),
+    jobDescriptionId: item.jobDescriptionId?.toHexString() ?? null,
     originalText: item.originalText,
     proposedText: item.proposedText,
     reason: item.reason,

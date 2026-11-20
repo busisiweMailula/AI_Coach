@@ -34,6 +34,7 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `POST /skills/gaps` | Candidate | Start learning-oriented gap analysis |
 | `GET /skills/gaps/{gapId}` | Candidate owner | Retrieve gap categories and learning actions |
 | `POST /resumes/optimize` | Candidate | Generate factual suggestions for candidate review |
+| `GET /resumes/{resumeId}/draft?jobDescriptionId={jobDescriptionId}` | Candidate owner | Generate a text CV draft using only accepted suggestions for that CV and job |
 | `GET /suggestions` | Candidate | List own resume suggestions and decisions |
 | `POST /suggestions/{suggestionId}/decision` | Candidate owner | Accept/reject one suggestion |
 | `POST /interviews/generate` | Candidate | Generate interview question set |

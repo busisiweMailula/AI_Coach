@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<void>;
@@ -59,78 +60,109 @@ export default function LoginPage({ onLogin, onRegister }: LoginPageProps) {
   const signingUp = mode === "signup";
 
   return (
-    <section className="card narrow">
-      <p className="eyebrow">{signingUp ? "Candidate registration" : "Account sign in"}</p>
-      <h1>{signingUp ? "Create your account" : "Welcome back"}</h1>
-      <p className="intro">
-        {signingUp
-          ? "Create a candidate account to manage your CV and preparation data."
-          : "Sign in to open your candidate, coach, or admin workspace."}
-      </p>
-      {message && (
-        <p className={`notice${message.type === "error" ? " error" : ""}`} role={message.type === "error" ? "alert" : "status"}>
-          {message.text}
-        </p>
-      )}
-      <form className="form-stack" onSubmit={handleSubmit}>
-        <label htmlFor="auth-email">Email address</label>
-        <input
-          id="auth-email"
-          name="email"
-          type="email"
-          autoComplete={signingUp ? "email" : "username"}
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-        />
-        <PasswordField
-          id="password"
-          label="Password"
-          name="password"
-          visible={showPassword}
-          onToggle={() => setShowPassword((visible) => !visible)}
-          autoComplete={signingUp ? "new-password" : "current-password"}
-          minLength={signingUp ? 12 : undefined}
-          maxLength={128}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          required
-        />
-        {signingUp && (
-          <>
-            <PasswordField
-              id="confirm-password"
-              label="Confirm password"
-              name="confirm-password"
-              visible={showConfirmPassword}
-              onToggle={() => setShowConfirmPassword((visible) => !visible)}
-              autoComplete="new-password"
-              minLength={12}
-              maxLength={128}
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
+    <main className="auth-layout">
+      <aside className="auth-story">
+        <Link className="auth-brand" to="/" aria-label="CV Matching Agent home">
+          <span className="auth-brand-mark" aria-hidden="true">C</span>
+          <span>CV Matching Agent</span>
+        </Link>
+        <div className="auth-story-copy">
+          <p className="auth-story-eyebrow">A clearer next step</p>
+          <h2>Make your experience work harder.</h2>
+          <p>Turn your CV and a role description into focused, evidence-led preparation for your next opportunity.</p>
+          <p className="auth-story-note"><span aria-hidden="true" /> Thoughtful preparation grounded in your own experience.</p>
+        </div>
+        <span className="auth-orbit auth-orbit-one" aria-hidden="true" />
+        <span className="auth-orbit auth-orbit-two" aria-hidden="true" />
+      </aside>
+
+      <section className="auth-main">
+        <div className="auth-card">
+          <p className="eyebrow">Your private workspace</p>
+          <h1>{signingUp ? "Create your account." : "Good to see you."}</h1>
+          <p className="auth-intro">
+            {signingUp ? "Create a candidate account to get started." : "Sign in to pick up where you left off."}
+          </p>
+          <div className="auth-mode-toggle" role="group" aria-label="Account access">
+            <button
+              className={signingUp ? "" : "active"}
+              type="button"
+              aria-pressed={!signingUp}
+              onClick={() => switchMode("login")}
+            >
+              Sign in
+            </button>
+            <button
+              className={signingUp ? "active" : ""}
+              type="button"
+              aria-pressed={signingUp}
+              onClick={() => switchMode("signup")}
+            >
+              Create account
+            </button>
+          </div>
+          {message && (
+            <p className={`notice${message.type === "error" ? " error" : ""}`} role={message.type === "error" ? "alert" : "status"}>
+              {message.text}
+            </p>
+          )}
+          <form className="form-stack auth-form" onSubmit={handleSubmit}>
+            <label htmlFor="auth-email">Email address</label>
+            <input
+              id="auth-email"
+              name="email"
+              type="email"
+              autoComplete={signingUp ? "email" : "username"}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               required
             />
-            <p className="supporting-copy">Use a password between 12 and 128 characters.</p>
-          </>
-        )}
-        <button className="primary" type="submit" disabled={submitting}>
-          {submitting
-            ? signingUp ? "Creating account…" : "Signing in…"
-            : signingUp ? "Create account" : "Sign in"}
-        </button>
-      </form>
-      <p className="supporting-copy auth-switch">
-        {signingUp ? "Already have an account?" : "New to CV Matching Agent?"}{" "}
-        <button
-          className="text-button"
-          type="button"
-          onClick={() => switchMode(signingUp ? "login" : "signup")}
-        >
-          {signingUp ? "Sign in" : "Create an account"}
-        </button>
-      </p>
-    </section>
+            <PasswordField
+              id="password"
+              label="Password"
+              name="password"
+              visible={showPassword}
+              onToggle={() => setShowPassword((visible) => !visible)}
+              autoComplete={signingUp ? "new-password" : "current-password"}
+              minLength={signingUp ? 12 : undefined}
+              maxLength={128}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+            {signingUp && (
+              <>
+                <PasswordField
+                  id="confirm-password"
+                  label="Confirm password"
+                  name="confirm-password"
+                  visible={showConfirmPassword}
+                  onToggle={() => setShowConfirmPassword((visible) => !visible)}
+                  autoComplete="new-password"
+                  minLength={12}
+                  maxLength={128}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                />
+                <p className="supporting-copy">Use a password between 12 and 128 characters.</p>
+              </>
+            )}
+            <button className="primary auth-submit" type="submit" disabled={submitting}>
+              <span>
+                {submitting
+                  ? signingUp ? "Creating account…" : "Signing in…"
+                  : signingUp ? "Create account" : "Sign in"}
+              </span>
+              {!submitting && <span aria-hidden="true">↗</span>}
+            </button>
+          </form>
+          <p className="auth-privacy-note">
+            Your account is private. Candidate CV processing stays off until you review and accept the privacy notice.
+          </p>
+        </div>
+      </section>
+    </main>
   );
 }
 

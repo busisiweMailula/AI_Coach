@@ -105,6 +105,23 @@ The Presidio service is a separate Python component with its own `presidio-servi
 
 Registration cannot assign coach or admin roles. Provisioning those roles is intentionally reserved for a controlled administrative workflow.
 
+### Local demo admin
+
+For local development only, set `DEMO_ADMIN_EMAIL` and `DEMO_ADMIN_PASSWORD` in your untracked root `.env` file. When the development API starts, it creates the initial admin account before listening. The account is not reset if it already exists, and a non-admin account with that email causes startup to fail rather than changing its role. The same operation can be run manually from `backend`; the command refuses to run unless `NODE_ENV=development`:
+
+```powershell
+Set-Location backend
+$env:DEMO_ADMIN_EMAIL = "admin@example.com"
+$securePassword = Read-Host "Choose a local demo admin password" -AsSecureString
+$env:DEMO_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new("", $securePassword).Password
+npm run bootstrap:demo-admin
+Remove-Item Env:\DEMO_ADMIN_EMAIL
+Remove-Item Env:\DEMO_ADMIN_PASSWORD
+Remove-Variable securePassword
+```
+
+Use the email and password you entered to sign in as admin. Register a separate candidate account, then assign that account the coach role in the admin account page. Public registration rejects a requested role, and only an authenticated admin can access account management or change candidate/coach roles. The bootstrap command is for the local JSON database only; never use demo credentials in production.
+
 ## Validation
 
 ```powershell

@@ -18,22 +18,25 @@ let connectDatabase: typeof import("../src/infra/db/database.js").connectDatabas
 let closeDatabase: typeof import("../src/infra/db/database.js").closeDatabase;
 let ensureIndexes: typeof import("../src/infra/db/indexes.js").ensureIndexes;
 let signAccessToken: typeof import("../src/middleware/auth.js").signAccessToken;
+let bootstrapDemoAdmin: typeof import("../src/modules/users/demo-admin-bootstrap.js").bootstrapDemoAdmin;
 
 beforeAll(async () => {
   process.env.JSON_DB_PATH = databasePath;
   process.env.FILE_STORAGE_DIR = storageRoot;
   process.env.MAX_UPLOAD_BYTES = "2048";
 
-  const [databaseModule, indexModule, appModule, authModule] = await Promise.all([
+  const [databaseModule, indexModule, appModule, authModule, bootstrapModule] = await Promise.all([
     import("../src/infra/db/database.js"),
     import("../src/infra/db/indexes.js"),
     import("../src/app.js"),
     import("../src/middleware/auth.js"),
+    import("../src/modules/users/demo-admin-bootstrap.js"),
   ]);
   connectDatabase = databaseModule.connectDatabase;
   closeDatabase = databaseModule.closeDatabase;
   ensureIndexes = indexModule.ensureIndexes;
   signAccessToken = authModule.signAccessToken;
+  bootstrapDemoAdmin = bootstrapModule.bootstrapDemoAdmin;
   database = await connectDatabase();
   await ensureIndexes();
   app = appModule.createApp();
@@ -62,6 +65,37 @@ afterAll(async () => {
 });
 
 describe("Phase 4 intake APIs", () => {
+  it("bootstraps a development-only admin without changing existing accounts", async () => {
+    const credentials = {
+      nodeEnv: "development",
+      email: "Demo.Admin@example.com",
+      password: "local-demo-admin-password",
+    };
+
+    expect(await bootstrapDemoAdmin(credentials)).toBe("created");
+    expect(await bootstrapDemoAdmin(credentials)).toBe("already_exists");
+    const login = await request(app)
+      .post("/api/v1/auth/login")
+      .send({ email: "demo.admin@example.com", password: credentials.password });
+    expect(login.status).toBe(200);
+    expect(login.body.data.user.role).toBe("admin");
+    await expect(bootstrapDemoAdmin({ ...credentials, nodeEnv: "production" }))
+      .rejects.toThrow("only available in development");
+
+    await database.collection("users").insertOne({
+      _id: new ObjectId(),
+      email: "candidate-owner@example.com",
+      passwordHash: "not-used-in-this-test",
+      role: "candidate",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await expect(bootstrapDemoAdmin({
+      ...credentials,
+      email: "candidate-owner@example.com",
+    })).rejects.toThrow("already used by a non-admin account");
+  });
+
   it("allows candidates to register and then sign in", async () => {
     const email = `candidate-${randomUUID()}@example.com`;
     const password = "candidate-password-123";
@@ -78,6 +112,18 @@ describe("Phase 4 intake APIs", () => {
       .send({ email, password });
     expect(login.status).toBe(200);
     expect(login.body.data.accessToken).toBeTruthy();
+  });
+
+  it("rejects self-selected roles during registration and blocks candidates from admin management", async () => {
+    const registration = await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: `self-coach-${randomUUID()}@example.com`, password: "candidate-password-123", role: "coach" });
+    expect(registration.status).toBe(400);
+
+    const adminPage = await request(app)
+      .get("/api/v1/admin/users")
+      .set("Authorization", `Bearer ${candidateToken}`);
+    expect(adminPage.status).toBe(403);
   });
 
   it("limits admin account management and rejects stale coach tokens after a role change", async () => {

@@ -578,6 +578,53 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
+  /resumes/{resumeId}/draft:
+    parameters:
+      - $ref: "#/components/parameters/ResumeId"
+    get:
+      tags: [Resumes]
+      summary: Generate a text CV draft using accepted suggestions only
+      description: Requires current resume-processing consent when accepted suggestions need to be applied.
+      parameters:
+        - name: jobDescriptionId
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/ObjectId"
+      responses:
+        "200":
+          description: Draft based on the owned resume and its accepted suggestions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [resumeId, jobDescriptionId, content, appliedSuggestionIds]
+                    properties:
+                      resumeId:
+                        $ref: "#/components/schemas/ObjectId"
+                      jobDescriptionId:
+                        $ref: "#/components/schemas/ObjectId"
+                      content:
+                        type: string
+                      appliedSuggestionIds:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ObjectId"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
   /suggestions:
     get:
       tags: [Suggestions]

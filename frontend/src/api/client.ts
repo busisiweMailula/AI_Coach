@@ -182,6 +182,7 @@ export interface SkillGapResult {
 export interface ResumeSuggestion {
   id: string;
   resumeId: string;
+  jobDescriptionId: string | null;
   originalText: string;
   proposedText: string;
   reason: string;
@@ -322,6 +323,15 @@ export function getResumes(token: string): Promise<{ items: Resume[] }> {
 
 export function getResume(token: string, resumeId: string): Promise<{ resume: Resume }> {
   return request(`/api/v1/resumes/${encodeURIComponent(resumeId)}`, { token });
+}
+
+export function getResumeDraft(
+  token: string,
+  resumeId: string,
+  jobDescriptionId: string,
+): Promise<{ resumeId: string; jobDescriptionId: string; content: string; appliedSuggestionIds: string[] }> {
+  const query = new URLSearchParams({ jobDescriptionId });
+  return request(`/api/v1/resumes/${encodeURIComponent(resumeId)}/draft?${query}`, { token });
 }
 
 export function updateResume(

@@ -96,8 +96,8 @@ export default function App() {
       <Route
         path="*"
         element={(
-          <div className={`shell${isCandidateWorkspace ? " shell-candidate" : ""}`}>
-            {!isCandidateWorkspace && (
+          <div className={`shell${isCandidateWorkspace ? " shell-candidate" : ""}${!token ? " shell-auth" : ""}`}>
+            {!isCandidateWorkspace && token && (
               <header className="site-header">
                 <Link className="brand" to="/" aria-label="CV Matching Agent home">CV Matching Agent</Link>
                 <div className="header-actions">

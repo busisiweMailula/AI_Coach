@@ -28,6 +28,7 @@ beforeAll(async () => {
   process.env.NODE_ENV = "test";
   process.env.LLM_PROVIDER = "mock";
   process.env.LLM_MODEL = "mock-v1";
+  process.env.RATE_LIMIT_MAX_REQUESTS = "1000";
   process.env.JSON_DB_PATH = databasePath;
   process.env.FILE_STORAGE_DIR = storageRoot;
 
@@ -218,6 +219,75 @@ describe("Phase 5 AI workflows", () => {
     const failedConsentJob = await waitForJob(noConsentJob.body.data.jobId as string, otherToken);
     expect(failedConsentJob.status).toBe("failed");
     expect(failedConsentJob.error.code).toBe("FORBIDDEN");
+  });
+
+  it("generates an owner-scoped CV draft with accepted suggestions only", async () => {
+    await grantResumeConsent();
+    const sourceText = "Created secure APIs. Led project planning.";
+    const { resumeId, jobDescriptionId } = await seedResumeAndDescription(sourceText);
+    const acceptedId = new ObjectId();
+    const rejectedId = new ObjectId();
+    const otherJobSuggestionId = new ObjectId();
+    const now = new Date();
+    for (const suggestion of [
+      {
+        _id: acceptedId,
+        ownerId,
+        resumeId,
+        jobDescriptionId,
+        originalText: "Created secure APIs.",
+        proposedText: "Designed and delivered secure APIs.",
+        reason: "Clarifies the contribution.",
+        sourceSnippet: "Created secure APIs.",
+        status: "accepted",
+        reviewStatus: "not_required",
+        flags: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        _id: rejectedId,
+        ownerId,
+        resumeId,
+        jobDescriptionId,
+        originalText: "Led project planning.",
+        proposedText: "Directed cross-functional project planning.",
+        reason: "Clarifies the contribution.",
+        sourceSnippet: "Led project planning.",
+        status: "rejected",
+        reviewStatus: "not_required",
+        flags: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        _id: otherJobSuggestionId,
+        ownerId,
+        resumeId,
+        jobDescriptionId: new ObjectId(),
+        originalText: "Led project planning.",
+        proposedText: "Directed cross-functional project planning.",
+        reason: "Clarifies the contribution.",
+        sourceSnippet: "Led project planning.",
+        status: "accepted",
+        reviewStatus: "not_required",
+        flags: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]) await database.collection("resume_suggestions").insertOne(suggestion);
+
+    const response = await request(app)
+      .get(`/api/v1/resumes/${resumeId.toHexString()}/draft?jobDescriptionId=${jobDescriptionId.toHexString()}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(response.status).toBe(200);
+    expect(response.body.data.content).toBe("Designed and delivered secure APIs. Led project planning.");
+    expect(response.body.data.appliedSuggestionIds).toEqual([acceptedId.toHexString()]);
+
+    const hidden = await request(app)
+      .get(`/api/v1/resumes/${resumeId.toHexString()}/draft?jobDescriptionId=${jobDescriptionId.toHexString()}`)
+      .set("Authorization", `Bearer ${otherToken}`);
+    expect(hidden.status).toBe(404);
   });
 
   it("resumes an in-memory checkpoint after database reconnect and stores rubric evaluation and progress", async () => {
