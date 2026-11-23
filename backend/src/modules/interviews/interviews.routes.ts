@@ -313,6 +313,7 @@ function questionResponse(question: InterviewQuestionDocument, index: number) {
     id: question._id.toHexString(),
     text: question.prompt,
     category: question.competency,
+    type: question.type,
     difficulty: question.difficulty,
     index,
   };

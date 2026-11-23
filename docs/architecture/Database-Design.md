@@ -19,11 +19,11 @@ Status: The current implementation stores collection-shaped JSON in `.data/ai-co
 
 Authentication identities.
 
-Fields: `_id:ObjectId` required; `email:string` required, normalized lowercase; `passwordHash:string` required; `role:"candidate"|"coach"|"admin"` required; `status:"active"|"disabled"` required; `createdAt:Date`, `updatedAt:Date` required; `lastLoginAt:Date` optional.
+Fields: `_id:ObjectId` required; `email:string` required, normalized lowercase; `passwordHash:string` required; `role:"candidate"|"coach"|"admin"` required; `status:"active"|"disabled"` (legacy records without status are treated as active); `createdAt:Date`, `updatedAt:Date` required; `lastLoginAt:Date` optional.
 
 Indexes: unique `{email:1}`; `{role:1,status:1}`.
 
-Ownership/access: user can read their safe profile; no public query returns `passwordHash`; role changes require audited administrative provisioning.
+Ownership/access: user can read their safe profile; no public query returns `passwordHash`; coach accounts are created by admins, candidates cannot be promoted, and admins can deactivate/reactivate candidate and coach accounts. Deactivated users cannot sign in or use existing access tokens; admin account status remains controlled provisioning.
 
 Sample:
 ```json

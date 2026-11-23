@@ -37,7 +37,7 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `GET /resumes/{resumeId}/draft?jobDescriptionId={jobDescriptionId}` | Candidate owner | Generate a text CV draft using only accepted suggestions for that CV and job |
 | `GET /suggestions` | Candidate | List own resume suggestions and decisions |
 | `POST /suggestions/{suggestionId}/decision` | Candidate owner | Accept/reject one suggestion |
-| `POST /interviews/generate` | Candidate | Generate interview question set |
+| `POST /interviews/generate` | Candidate | Generate technical, behavioural, or mixed interview questions |
 | `GET /interviews/question-sets/{questionSetId}` | Candidate owner | Retrieve generated questions |
 | `POST /interviews` | Candidate | Start graph and return first question |
 | `GET /interviews/{sessionId}` | Candidate owner | Return session state without another user's content |
@@ -55,12 +55,13 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `GET /reviews/{reviewId}` | Assigned coach or candidate owner (status-limited) | Candidate receives status metadata; coach receives owner-scoped content for review |
 | `POST /reviews/{reviewId}/decision` | Assigned coach | Approve/edit/reject with reason |
 | `GET /admin/users` | Admin | List up to 200 safe account records, not candidate content |
-| `PATCH /admin/users/{userId}/role` | Admin | Change candidate/coach roles; admin accounts require manual provisioning |
+| `POST /admin/users` | Admin | Register a coach account directly with an initial password |
+| `PATCH /admin/users/{userId}/status` | Admin | Deactivate/reactivate candidate and coach accounts; admin accounts require controlled provisioning |
 | `GET /admin/config` | Admin | Read active non-secret configuration |
 | `PATCH /admin/config` | Admin | Update validated versioned thresholds/config |
-| `GET /admin/audit-logs` | Admin | Read restricted audit metadata |
+| `GET /admin/audit-logs` | Admin | Read the latest 250 account and application activity events without request bodies or candidate content |
 
-Admin and coach endpoints re-check the account role against the JSON database for each privileged request, so role changes take effect without waiting for the access token to expire. Role changes are recorded in the audit log.
+Admin and coach endpoints re-check the account role against the JSON database for each privileged request. Deactivated users cannot sign in, and existing access tokens are rejected on subsequent requests. Candidate self-registration cannot select a role; candidates cannot be promoted to coaches, which admins instead register directly. Admin accounts require controlled provisioning and cannot be deactivated from this screen. Account-status changes and other authenticated write actions are recorded as metadata-only audit events.
 
 ## Async job response
 

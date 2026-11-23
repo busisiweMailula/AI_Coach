@@ -120,7 +120,7 @@ Remove-Item Env:\DEMO_ADMIN_PASSWORD
 Remove-Variable securePassword
 ```
 
-Use the email and password you entered to sign in as admin. Register a separate candidate account, then assign that account the coach role in the admin account page. Public registration rejects a requested role, and only an authenticated admin can access account management or change candidate/coach roles. The bootstrap command is for the local JSON database only; never use demo credentials in production.
+Use the email and password you entered to sign in as admin. In the admin workspace, manage account status, directly register new coaches, and view audit activity. Candidate accounts cannot be promoted to coach; register coaches directly. Deactivated candidates and coaches cannot sign in or use existing access tokens. Admin accounts require controlled provisioning. The bootstrap command is for the local JSON database only; never use demo credentials in production.
 
 ## Validation
 

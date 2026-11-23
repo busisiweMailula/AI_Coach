@@ -290,13 +290,58 @@ describe("Phase 5 AI workflows", () => {
     expect(hidden.status).toBe(404);
   });
 
+  it("applies accepted suggestions when anonymization changes line wrapping and entity text", async () => {
+    await grantResumeConsent();
+    const sourceText = "Highlights:\nBuilt a scalable system for Example Corp.\nResult: reduced latency";
+    const { resumeId, jobDescriptionId } = await seedResumeAndDescription(sourceText);
+    const suggestionId = new ObjectId();
+    const now = new Date();
+    await database.collection("resume_suggestions").insertOne({
+      _id: suggestionId,
+      ownerId,
+      resumeId,
+      jobDescriptionId,
+      originalText: "Built a scalable system for <ORGANIZATION>.",
+      proposedText: "Built a scalable system supporting business operations.",
+      reason: "Clarifies the contribution.",
+      sourceSnippet: "Built a scalable system for <ORGANIZATION>.",
+      status: "accepted",
+      reviewStatus: "not_required",
+      flags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    configureResumeAnonymizer({
+      anonymize: async () => "Highlights: Built a scalable system for <ORGANIZATION>. Result: reduced latency",
+    });
+
+    try {
+      const response = await request(app)
+        .get(`/api/v1/resumes/${resumeId.toHexString()}/draft?jobDescriptionId=${jobDescriptionId.toHexString()}`)
+        .set("Authorization", `Bearer ${ownerToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.content)
+        .toBe("Highlights:\nBuilt a scalable system supporting business operations.\nResult: reduced latency");
+      expect(response.body.data.appliedSuggestionIds).toEqual([suggestionId.toHexString()]);
+    } finally {
+      configureResumeAnonymizer({ anonymize: async (text) => text });
+    }
+  });
+
   it("resumes an in-memory checkpoint after database reconnect and stores rubric evaluation and progress", async () => {
     await grantResumeConsent();
     const { resumeId, jobDescriptionId } = await seedResumeAndDescription("TypeScript backend engineer");
     const generated = await request(app)
       .post("/api/v1/interviews/generate")
       .set("Authorization", `Bearer ${ownerToken}`)
-      .send({ resumeId: resumeId.toHexString(), jobDescriptionId: jobDescriptionId.toHexString(), questionCount: 1 });
+      .send({
+        resumeId: resumeId.toHexString(),
+        jobDescriptionId: jobDescriptionId.toHexString(),
+        questionCount: 1,
+        interviewType: "technical",
+      });
+
     expect(generated.status).toBe(202);
     const generationStatus = await waitForJob(generated.body.data.jobId as string);
     expect(generationStatus.status).toBe("succeeded");
@@ -309,6 +354,7 @@ describe("Phase 5 AI workflows", () => {
     expect(started.status).toBe(201);
     const sessionId = started.body.data.id as string;
     expect(started.body.data.currentQuestion).toBeTruthy();
+    expect(started.body.data.currentQuestion.type).toBe("technical");
 
     await closeDatabase();
     database = await connectDatabase();
@@ -350,6 +396,29 @@ describe("Phase 5 AI workflows", () => {
       .send({ answerText: "I would clarify requirements, design a small API, and test it." });
     expect(duplicate.status).toBe(200);
     expect(duplicate.body.data.status).toBe("completed");
+  });
+
+  it("generates a mixed question set when both interview types are requested", async () => {
+    const { jobDescriptionId } = await seedResumeAndDescription("Platform engineer");
+    const generated = await request(app)
+      .post("/api/v1/interviews/generate")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        jobDescriptionId: jobDescriptionId.toHexString(),
+        questionCount: 2,
+        interviewType: "both",
+      });
+    expect(generated.status).toBe(202);
+
+    const generationStatus = await waitForJob(generated.body.data.jobId as string);
+    expect(generationStatus.status).toBe("succeeded");
+    const questionSet = await request(app)
+      .get(`/api/v1/interviews/question-sets/${generationStatus.resultId as string}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+
+    expect(questionSet.status).toBe(200);
+    expect(questionSet.body.data.questions.map((question: { type: string }) => question.type).sort())
+      .toEqual(["behavioral", "technical"]);
   });
 
   it("fails closed rather than sending raw CV text when anonymization is unavailable", async () => {

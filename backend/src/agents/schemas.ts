@@ -63,6 +63,7 @@ export const QuestionsSchema = z.object({
   questions: z.array(z.object({
     prompt: z.string().min(1).max(2000),
     competency: z.string().min(1).max(100),
+    type: z.enum(["technical", "behavioral"]),
     difficulty: z.enum(["easy", "medium", "hard"]),
   })).min(1).max(30),
 }).strict();

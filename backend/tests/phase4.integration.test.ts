@@ -104,7 +104,7 @@ describe("Phase 4 intake APIs", () => {
       .send({ email, password });
 
     expect(registration.status).toBe(201);
-    expect(registration.body.data.user).toMatchObject({ email, role: "candidate" });
+    expect(registration.body.data.user).toMatchObject({ email, role: "candidate", status: "active" });
     expect(registration.body.data.user.passwordHash).toBeUndefined();
 
     const login = await request(app)
@@ -126,7 +126,7 @@ describe("Phase 4 intake APIs", () => {
     expect(adminPage.status).toBe(403);
   });
 
-  it("limits admin account management and rejects stale coach tokens after a role change", async () => {
+  it("keeps candidates from becoming coaches and lets admins deactivate and reactivate accounts", async () => {
     const adminId = new ObjectId("65f0c0a3f6b8a7b123456786");
     const now = new Date();
     for (const user of [
@@ -152,44 +152,106 @@ describe("Phase 4 intake APIs", () => {
       email: "admin@example.com",
       role: "admin",
     });
+    const candidateAdminAccess = await request(app)
+      .get("/api/v1/admin/audit-logs")
+      .set("Authorization", `Bearer ${candidateToken}`);
+    expect(candidateAdminAccess.status).toBe(403);
+    const candidateCoachRegistration = await request(app)
+      .post("/api/v1/admin/users")
+      .set("Authorization", `Bearer ${candidateToken}`)
+      .send({ email: "self-assigned-coach@example.com", password: "coach-initial-password-123" });
+    expect(candidateCoachRegistration.status).toBe(403);
 
     const list = await request(app)
       .get("/api/v1/admin/users")
       .set("Authorization", `Bearer ${adminToken}`);
     expect(list.status).toBe(200);
     expect(list.body.data.users).toHaveLength(2);
-    expect(list.body.data.users[0].passwordHash).toBeUndefined();
+    expect(list.body.data.users.every((user: { passwordHash?: string; status: string }) => (
+      user.passwordHash === undefined && user.status === "active"
+    ))).toBe(true);
 
-    const changed = await request(app)
+    const candidateRoleChange = await request(app)
       .patch("/api/v1/admin/users/65f0c0a3f6b8a7b123456789/role")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ role: "coach" });
-    expect(changed.status).toBe(200);
-    expect(changed.body.data.user.role).toBe("coach");
+    expect(candidateRoleChange.status).toBe(404);
+    expect((await database.collection("users").findOne({ _id: new ObjectId("65f0c0a3f6b8a7b123456789") }))?.role).toBe("candidate");
 
-    const coachToken = signAccessToken({
-      userId: "65f0c0a3f6b8a7b123456789",
-      email: "candidate@example.com",
-      role: "coach",
-    });
+    const registeredCoach = await request(app)
+      .post("/api/v1/admin/users")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ email: "new-coach@example.com", password: "coach-initial-password-123" });
+    expect(registeredCoach.status).toBe(201);
+    expect(registeredCoach.body.data.user).toMatchObject({ email: "new-coach@example.com", role: "coach", status: "active" });
+    expect(registeredCoach.body.data.user.passwordHash).toBeUndefined();
+    const coachLogin = await request(app)
+      .post("/api/v1/auth/login")
+      .send({ email: "new-coach@example.com", password: "coach-initial-password-123" });
+    expect(coachLogin.status).toBe(200);
+    expect(coachLogin.body.data.user.role).toBe("coach");
+
+    const cannotRegisterAdmin = await request(app)
+      .post("/api/v1/admin/users")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ email: "another-admin@example.com", password: "coach-initial-password-123", role: "admin" });
+    expect(cannotRegisterAdmin.status).toBe(400);
+
+    const deactivateCandidate = await request(app)
+      .patch("/api/v1/admin/users/65f0c0a3f6b8a7b123456789/status")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "disabled" });
+    expect(deactivateCandidate.status).toBe(200);
+    expect(deactivateCandidate.body.data.user).toMatchObject({ role: "candidate", status: "disabled" });
+    expect((await request(app)
+      .get("/api/v1/users/me")
+      .set("Authorization", `Bearer ${candidateToken}`)).status).toBe(401);
+    const reactivateCandidate = await request(app)
+      .patch("/api/v1/admin/users/65f0c0a3f6b8a7b123456789/status")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+    expect(reactivateCandidate.status).toBe(200);
+    expect((await request(app)
+      .get("/api/v1/users/me")
+      .set("Authorization", `Bearer ${candidateToken}`)).status).toBe(200);
+
+    const adminCannotDeactivateAdmin = await request(app)
+      .patch(`/api/v1/admin/users/${adminId.toHexString()}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "disabled" });
+    expect(adminCannotDeactivateAdmin.status).toBe(409);
+
+    const coachId = new ObjectId(registeredCoach.body.data.user.id);
+    const coachToken = coachLogin.body.data.accessToken as string;
+    const deactivateCoach = await request(app)
+      .patch(`/api/v1/admin/users/${coachId.toHexString()}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "disabled" });
+    expect(deactivateCoach.status).toBe(200);
+    expect((await request(app)
+      .get("/api/v1/reviews/pending")
+      .set("Authorization", `Bearer ${coachToken}`)).status).toBe(401);
+    expect((await request(app)
+      .post("/api/v1/auth/login")
+      .send({ email: "new-coach@example.com", password: "coach-initial-password-123" })).status).toBe(401);
+    const reactivateCoach = await request(app)
+      .patch(`/api/v1/admin/users/${coachId.toHexString()}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+    expect(reactivateCoach.status).toBe(200);
     expect((await request(app)
       .get("/api/v1/reviews/pending")
       .set("Authorization", `Bearer ${coachToken}`)).status).toBe(200);
 
-    await request(app)
-      .patch("/api/v1/admin/users/65f0c0a3f6b8a7b123456789/role")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({ role: "candidate" });
-    expect((await request(app)
-      .get("/api/v1/reviews/pending")
-      .set("Authorization", `Bearer ${coachToken}`)).status).toBe(403);
-
-    const cannotProvisionAdmin = await request(app)
-      .patch("/api/v1/admin/users/65f0c0a3f6b8a7b123456789/role")
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({ role: "admin" });
-    expect(cannotProvisionAdmin.status).toBe(400);
-    expect(await database.collection("audit_logs").countDocuments({ action: "user_role_changed" })).toBe(2);
+    expect(await database.collection("audit_logs").countDocuments({ action: "user_account_status_changed" })).toBe(4);
+    const auditLogs = await request(app)
+      .get("/api/v1/admin/audit-logs")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(auditLogs.status).toBe(200);
+    expect(auditLogs.body.data.items.some((item: { action: string }) => item.action === "coach_account_registered")).toBe(true);
+    expect(auditLogs.body.data.items.some((item: { action: string; previousStatus?: string; newStatus?: string }) => (
+      item.action === "user_account_status_changed" && item.previousStatus === "active" && item.newStatus === "disabled"
+    ))).toBe(true);
   });
 
   it("requires explicit consent and only allows the owner to read or edit an uploaded resume", async () => {

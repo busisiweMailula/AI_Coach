@@ -38,6 +38,7 @@ export async function bootstrapDemoAdmin(input: {
     email: parsed.data.email,
     passwordHash: await bcrypt.hash(parsed.data.password, 12),
     role: "admin",
+    status: "active",
     createdAt: now,
     updatedAt: now,
   });

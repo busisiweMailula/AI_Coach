@@ -32,18 +32,22 @@ import {
   type InterviewEvaluation,
   type InterviewQuestion,
   type InterviewSession,
+  type InterviewType,
   type JobDescription,
   type MatchResult,
   type Resume,
   type ResumeSuggestion,
   type SkillGapResult,
 } from "../../api/client";
+import { useInterviewSpeech } from "./interview-speech";
+import { useInterviewRecognition } from "./interview-recognition";
 
 interface Props {
   token: string;
   email: string;
   onWithdraw: () => Promise<void>;
   onConsentRejected: () => Promise<void>;
+  onSignOut: () => void;
 }
 
 type Tab = "dashboard" | "resume" | "jobs" | "match" | "studio" | "interview" | "privacy";
@@ -56,10 +60,11 @@ const workspaceNavigation: Array<{ label: string; tabs: Tab[] }> = [
   { label: "Privacy & settings", tabs: ["privacy"] },
 ];
 
-export default function CandidateWorkspace({ token, email, onWithdraw, onConsentRejected, onSignOut }: Props & { onSignOut: () => void }) {
+export default function CandidateWorkspace({ token, email, onWithdraw, onConsentRejected, onSignOut }: Props) {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [progress, setProgress] = useState<CandidateProgress | null>(null);
   const [resumes, setResumes] = useState<Resume[]>([]);
+  const [selectedResumeId, setSelectedResumeId] = useState("");
   const [jobs, setJobs] = useState<JobDescription[]>([]);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,6 +77,9 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
         if (!active) return;
         setProgress(progressResult);
         setResumes(resumeResult.items);
+        setSelectedResumeId((current) => resumeResult.items.some((resume) => resume.id === current)
+          ? current
+          : resumeResult.items[0]?.id ?? "");
         setJobs(jobResult.items);
       })
       .catch((error: unknown) => {
@@ -132,7 +140,7 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
         <div className="sidebar-profile">
           <span className="profile-avatar" aria-hidden="true">{email.charAt(0).toUpperCase()}</span>
           <span className="profile-copy"><strong>{email}</strong><small>Candidate account</small></span>
-          <button className="signout-button" type="button" aria-label="Sign out" onClick={onSignOut}>↪</button>
+          <button className="signout-button" type="button" title="Sign out" aria-label="Sign out" onClick={onSignOut}>↪</button>
         </div>
       </aside>
 
@@ -169,7 +177,14 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
                       onSelect={navigateTo}
                     />
                     {tab === "resume" ? (
-                      <ResumeSection token={token} resumes={resumes} onChanged={refreshData} onConsentRejected={onConsentRejected} />
+                      <ResumeSection
+                        token={token}
+                        resumes={resumes}
+                        selectedResumeId={selectedResumeId}
+                        onSelectResume={setSelectedResumeId}
+                        onChanged={refreshData}
+                        onConsentRejected={onConsentRejected}
+                      />
                     ) : (
                       <JobsSection token={token} jobs={jobs} onChanged={refreshData} />
                     )}
@@ -189,8 +204,14 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
                       onSelect={navigateTo}
                     />
                     {tab === "match"
-                      ? <MatchSection token={token} resumes={resumes} jobs={jobs} />
-                      : <StudioSection token={token} resumes={resumes} jobs={jobs} />}
+                      ? <MatchSection token={token} resumes={resumes} selectedResumeId={selectedResumeId} jobs={jobs} />
+                      : <StudioSection
+                        key={`${token}:${selectedResumeId}`}
+                        token={token}
+                        resumes={resumes}
+                        selectedResumeId={selectedResumeId}
+                        jobs={jobs}
+                      />}
                   </>
                 )}
                 {tab === "interview" && (
@@ -200,7 +221,7 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
                       title="Practise with a little more confidence."
                       description="Build questions for a role, practise one answer at a time, and review actionable feedback."
                     />
-                    <InterviewSection token={token} resumes={resumes} jobs={jobs} />
+                    <InterviewSection token={token} resumes={resumes} selectedResumeId={selectedResumeId} jobs={jobs} />
                   </>
                 )}
                 {tab === "privacy" && (
@@ -303,7 +324,7 @@ function Dashboard({ email, progress, resumes, jobs, onOpen }: {
         </article>
         <article className="overview-metric">
           <span className="metric-icon score-icon" aria-hidden="true">✳</span>
-          <div><span>Latest practice score</span><strong>{practiceScore ? `${practiceScore}%` : "—"}</strong><small>Complete an interview to get feedback</small></div>
+          <div><span>Latest practice score</span><strong>{practiceScore == null ? "—" : `${practiceScore.toFixed(2)}%`}</strong><small>Complete an interview to get feedback</small></div>
         </article>
       </div>
       <div className="overview-next-steps">
@@ -379,14 +400,15 @@ function consentPurposeLabel(purpose: string) {
   return purpose.replaceAll("_", " ");
 }
 
-function ResumeSection({ token, resumes, onChanged, onConsentRejected }: {
+function ResumeSection({ token, resumes, selectedResumeId, onSelectResume, onChanged, onConsentRejected }: {
   token: string;
   resumes: Resume[];
+  selectedResumeId: string;
+  onSelectResume: (resumeId: string) => void;
   onChanged: () => Promise<void>;
   onConsentRejected: () => Promise<void>;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [selectedId, setSelectedId] = useState(resumes[0]?.id ?? "");
   const [selected, setSelected] = useState<Resume | null>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -394,9 +416,9 @@ function ResumeSection({ token, resumes, onChanged, onConsentRejected }: {
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
 
   useEffect(() => {
-    if (!selectedId) { setSelected(null); return; }
+    if (!selectedResumeId) { setSelected(null); return; }
     let active = true;
-    void getResume(token, selectedId).then((result) => {
+    void getResume(token, selectedResumeId).then((result) => {
       if (!active) return;
       setSelected(result.resume);
       setTitle(result.resume.title ?? "");
@@ -405,7 +427,7 @@ function ResumeSection({ token, resumes, onChanged, onConsentRejected }: {
       if (active) setNotice({ text: errorMessage(error), error: true });
     });
     return () => { active = false; };
-  }, [token, selectedId]);
+  }, [token, selectedResumeId]);
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -415,7 +437,7 @@ function ResumeSection({ token, resumes, onChanged, onConsentRejected }: {
     setNotice(null);
     try {
       const result = await uploadResume(token, file);
-      setSelectedId(result.resume.id);
+      onSelectResume(result.resume.id);
       if (result.resume.parseJobId) await waitForJob(token, result.resume.parseJobId);
       await onChanged();
       setNotice({ text: "CV uploaded successfully.", error: false });
@@ -428,11 +450,11 @@ function ResumeSection({ token, resumes, onChanged, onConsentRejected }: {
   }
 
   async function saveMetadata() {
-    if (!selectedId) return;
+    if (!selectedResumeId) return;
     setBusy(true);
     setNotice(null);
     try {
-      await updateResume(token, selectedId, { title: title.trim() || undefined, notes: notes.trim() });
+      await updateResume(token, selectedResumeId, { title: title.trim() || undefined, notes: notes.trim() });
       await onChanged();
       setNotice({ text: "CV details saved.", error: false });
     } catch (error) {
@@ -454,7 +476,7 @@ function ResumeSection({ token, resumes, onChanged, onConsentRejected }: {
         {resumes.length > 0 && (
           <>
             <h2 className="section-heading">Your CVs</h2>
-            <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)} aria-label="Select CV">
+            <select value={selectedResumeId} onChange={(event) => onSelectResume(event.target.value)} aria-label="Select CV">
               {resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.title || resume.originalFileName}</option>)}
             </select>
           </>
@@ -560,17 +582,22 @@ function JobsSection({ token, jobs, onChanged }: {
   );
 }
 
-function MatchSection({ token, resumes, jobs }: { token: string; resumes: Resume[]; jobs: JobDescription[] }) {
-  const [resumeId, setResumeId] = useState(resumes[0]?.id ?? "");
+function MatchSection({ token, resumes, selectedResumeId, jobs }: {
+  token: string;
+  resumes: Resume[];
+  selectedResumeId: string;
+  jobs: JobDescription[];
+}) {
   const [jobId, setJobId] = useState(jobs[0]?.id ?? "");
   const [match, setMatch] = useState<MatchResult | null>(null);
   const [gaps, setGaps] = useState<SkillGapResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
 
   async function run() {
-    if (!resumeId || !jobId) {
-      setNotice({ text: "Select both a CV and a job description.", error: true });
+    if (!selectedResumeId || !jobId) {
+      setNotice({ text: "Select a CV in Resume & role and choose a job description.", error: true });
       return;
     }
     setBusy(true);
@@ -579,8 +606,8 @@ function MatchSection({ token, resumes, jobs }: { token: string; resumes: Resume
     setGaps(null);
     try {
       const [matchJob, gapJob] = await Promise.all([
-        analyzeMatch(token, resumeId, jobId),
-        analyzeSkillGaps(token, resumeId, jobId),
+        analyzeMatch(token, selectedResumeId, jobId),
+        analyzeSkillGaps(token, selectedResumeId, jobId),
       ]);
       const [matchStatus, gapStatus] = await Promise.all([
         waitForJob(token, matchJob.jobId),
@@ -599,11 +626,10 @@ function MatchSection({ token, resumes, jobs }: { token: string; resumes: Resume
   return (
     <div className="workspace-panel">
       <h2>CV and job match</h2>
+      <p className="supporting-copy">
+        Using CV: <strong>{selectedResume ? (selectedResume.title || selectedResume.originalFileName) : "Select or upload a CV in Resume & role"}</strong>
+      </p>
       <div className="selector-grid">
-        <label>CV<select value={resumeId} onChange={(event) => setResumeId(event.target.value)}>
-          <option value="">Select CV</option>
-          {resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.title || resume.originalFileName}</option>)}
-        </select></label>
         <label>Job description<select value={jobId} onChange={(event) => setJobId(event.target.value)}>
           <option value="">Select job</option>
           {jobs.map((job) => <option key={job.id} value={job.id}>{job.roleTitle || `Job ${job.id.slice(-6)}`}</option>)}
@@ -641,38 +667,51 @@ function MatchSection({ token, resumes, jobs }: { token: string; resumes: Resume
   );
 }
 
-function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resume[]; jobs: JobDescription[] }) {
-  const [resumeId, setResumeId] = useState(resumes[0]?.id ?? "");
+function StudioSection({ token, resumes, selectedResumeId, jobs }: {
+  token: string;
+  resumes: Resume[];
+  selectedResumeId: string;
+  jobs: JobDescription[];
+}) {
   const [jobId, setJobId] = useState(jobs[0]?.id ?? "");
   const [suggestions, setSuggestions] = useState<ResumeSuggestion[]>([]);
+  const [generationComplete, setGenerationComplete] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    void getResumeSuggestions(token).then((result) => {
-      if (active) setSuggestions(result.items);
-    }).catch((error: unknown) => {
-      if (active) setNotice({ text: errorMessage(error), error: true });
-    });
-    return () => { active = false; };
-  }, [token]);
+  const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
 
   async function generate() {
-    if (!resumeId || !jobId) {
-      setNotice({ text: "Select both a CV and a job description.", error: true });
+    setSuggestions([]);
+    setDraft(null);
+    setGenerationComplete(false);
+    setNotice(null);
+    if (!selectedResumeId || !jobId) {
+      setNotice({ text: "Select a CV in Resume & role and choose a job description.", error: true });
       return;
     }
     setBusy(true);
-    setNotice(null);
     try {
-      const accepted = await optimizeResume(token, resumeId, jobId);
+      const previous = await getResumeSuggestions(token);
+      const previousIds = new Set(previous.items
+        .filter((item) => item.resumeId === selectedResumeId && item.jobDescriptionId === jobId)
+        .map((item) => item.id));
+      const accepted = await optimizeResume(token, selectedResumeId, jobId);
       await waitForJob(token, accepted.jobId);
       const result = await getResumeSuggestions(token);
-      setSuggestions(result.items);
-      setDraft(null);
-      setNotice({ text: "Resume suggestions are ready for review.", error: false });
+      const generatedSuggestions = result.items.filter((item) =>
+        item.resumeId === selectedResumeId &&
+        item.jobDescriptionId === jobId &&
+        !previousIds.has(item.id));
+      setSuggestions(generatedSuggestions);
+      setGenerationComplete(true);
+      setNotice({
+        text: generatedSuggestions.length > 0
+          ? "New resume suggestions are ready for review."
+          : "No new suggestions were generated for this CV and job.",
+        error: false,
+      });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
     } finally {
@@ -696,14 +735,14 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
   }
 
   async function generateDraft() {
-    if (!resumeId || !jobId) {
-      setNotice({ text: "Select both a CV and a job description.", error: true });
+    if (!selectedResumeId || !jobId) {
+      setNotice({ text: "Select a CV in Resume & role and choose a job description.", error: true });
       return;
     }
     setBusy(true);
     setNotice(null);
     try {
-      const result = await getResumeDraft(token, resumeId, jobId);
+      const result = await getResumeDraft(token, selectedResumeId, jobId);
       setDraft(result.content);
       setNotice({
         text: `${result.appliedSuggestionIds.length} accepted suggestion${result.appliedSuggestionIds.length === 1 ? "" : "s"} applied to the CV draft.`,
@@ -716,37 +755,61 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
     }
   }
 
-  function downloadDraft() {
+  async function downloadDraft() {
     if (draft === null) return;
-    const selectedResume = resumes.find((resume) => resume.id === resumeId);
     const baseName = (selectedResume?.title || selectedResume?.originalFileName || "resume")
       .replace(/\.[^.]+$/, "")
       .replace(/[^\w.-]+/g, "_");
-    const url = URL.createObjectURL(new Blob([draft], { type: "text/plain;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${baseName}-draft.txt`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setDownloading(true);
+    try {
+      const { createResumeWordDocument } = await import("./resume-document");
+      const documentBlob = await createResumeWordDocument(draft);
+      const url = URL.createObjectURL(documentBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${baseName}-draft.docx`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setNotice({ text: errorMessage(error), error: true });
+    } finally {
+      setDownloading(false);
+    }
   }
 
   const visibleSuggestions = suggestions.filter((suggestion) =>
-    suggestion.resumeId === resumeId && suggestion.jobDescriptionId === jobId);
+    suggestion.resumeId === selectedResumeId && suggestion.jobDescriptionId === jobId);
 
   return (
     <div className="workspace-panel">
       <h2>Resume improvement studio</h2>
+      <p className="supporting-copy">
+        Using CV: <strong>{selectedResume ? (selectedResume.title || selectedResume.originalFileName) : "Select or upload a CV in Resume & role"}</strong>
+      </p>
       <div className="selector-grid">
-        <label>CV<select value={resumeId} onChange={(event) => { setResumeId(event.target.value); setDraft(null); }}>
-          <option value="">Select CV</option>{resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.title || resume.originalFileName}</option>)}
-        </select></label>
-        <label>Job description<select value={jobId} onChange={(event) => { setJobId(event.target.value); setDraft(null); }}>
+        <label>Job description<select value={jobId} onChange={(event) => {
+          setJobId(event.target.value);
+          setSuggestions([]);
+          setGenerationComplete(false);
+          setDraft(null);
+          setNotice(null);
+        }}>
           <option value="">Select job</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.roleTitle || `Job ${job.id.slice(-6)}`}</option>)}
         </select></label>
         <button className="primary" type="button" disabled={busy} onClick={() => void generate()}>{busy ? "Generating…" : "Generate suggestions"}</button>
       </div>
       {notice && <p className={`notice${notice.error ? " error" : ""}`}>{notice.text}</p>}
-      {visibleSuggestions.length === 0 ? <p className="supporting-copy">No resume suggestions yet for this CV.</p> : (
+      {!generationComplete ? (
+        <p className="supporting-copy" role={busy ? "status" : undefined}>
+          {busy
+            ? "Generating suggestions for this CV and job…"
+            : notice?.error
+              ? "No suggestions were loaded. Fix the issue above and try again."
+              : "Suggestions appear here after you select Generate suggestions."}
+        </p>
+      ) : visibleSuggestions.length === 0 ? (
+        <p className="supporting-copy">No new suggestions were generated for this CV and job.</p>
+      ) : (
         <div className="suggestion-list">
           {visibleSuggestions.map((suggestion) => (
             <article className="suggestion-card" key={suggestion.id}>
@@ -768,12 +831,19 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
       )}
       <section className="result-section">
         <h3>CV draft</h3>
-        <p className="supporting-copy">Only accepted suggestions for this CV are applied. Pending and rejected suggestions are left out.</p>
+        <p className="supporting-copy">
+          Only accepted suggestions are included. Download the editable Word document to complete or update fields, then export it to PDF from Word.
+          Accepted changes that cannot be safely matched to an exact CV passage are included in an “Accepted CV updates” section rather than discarded.
+        </p>
         <div className="actions">
-          <button className="secondary" type="button" disabled={busy || !resumeId || !jobId} onClick={() => void generateDraft()}>
+          <button className="secondary" type="button" disabled={busy || !selectedResumeId || !jobId} onClick={() => void generateDraft()}>
             {busy ? "Preparing…" : "Generate CV draft"}
           </button>
-          {draft !== null && <button className="secondary" type="button" onClick={downloadDraft}>Download draft</button>}
+          {draft !== null && (
+            <button className="secondary" type="button" disabled={downloading} onClick={() => void downloadDraft()}>
+              {downloading ? "Preparing Word document…" : "Download editable Word CV"}
+            </button>
+          )}
         </div>
         {draft !== null && <pre className="source-preview">{draft}</pre>}
       </section>
@@ -781,30 +851,116 @@ function StudioSection({ token, resumes, jobs }: { token: string; resumes: Resum
   );
 }
 
-function InterviewSection({ token, resumes, jobs }: { token: string; resumes: Resume[]; jobs: JobDescription[] }) {
+function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
+  token: string;
+  resumes: Resume[];
+  selectedResumeId: string;
+  jobs: JobDescription[];
+}) {
   const [jobId, setJobId] = useState(jobs[0]?.id ?? "");
-  const [resumeId, setResumeId] = useState(resumes[0]?.id ?? "");
   const [questionCount, setQuestionCount] = useState(5);
+  const [interviewType, setInterviewType] = useState<InterviewType>("both");
   const [questions, setQuestions] = useState<InterviewQuestion[]>([]);
   const [questionSetId, setQuestionSetId] = useState("");
   const [session, setSession] = useState<InterviewSession | null>(null);
+  const [conversation, setConversation] = useState<Array<{ question: InterviewQuestion; answer: string }>>([]);
   const [answer, setAnswer] = useState("");
   const [evaluation, setEvaluation] = useState<InterviewEvaluation[] | null>(null);
+  const [evaluationJobId, setEvaluationJobId] = useState("");
+  const [evaluationRetry, setEvaluationRetry] = useState(0);
+  const [evaluationLoading, setEvaluationLoading] = useState(false);
+  const [autoRead, setAutoRead] = useState(false);
+  const [voiceURI, setVoiceURI] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const speech = useInterviewSpeech();
+  const recognition = useInterviewRecognition();
+  const currentQuestion = session?.currentQuestion ?? null;
+  const activeJob = jobs.find((job) => job.id === jobId);
+  const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
+  const sessionActive = session?.status === "in_progress" || session?.status === "evaluating";
+  const feedbackText = evaluation ? evaluationSpeechText(evaluation) : "";
+  const answerWithTranscript = joinAnswerText(answer, recognition.transcript, recognition.interimTranscript);
+
+  useEffect(() => {
+    if (autoRead && session?.status === "in_progress" && currentQuestion) {
+      speech.speak(currentQuestion.text, voiceURI);
+    }
+  }, [autoRead, currentQuestion?.id, session?.status, speech.speak, voiceURI]);
+
+  useEffect(() => {
+    if (autoRead && feedbackText) speech.speak(feedbackText, voiceURI);
+  }, [autoRead, feedbackText, speech.speak, voiceURI]);
+
+  useEffect(() => {
+    if (!session || session.status !== "evaluating") return;
+    const evaluatingSession = session;
+    let active = true;
+    setEvaluationLoading(true);
+    setNotice(null);
+
+    async function loadFeedback() {
+      try {
+        if (evaluationJobId) {
+          await waitForJob(token, evaluationJobId);
+        } else {
+          let completed = false;
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            await delay(1000);
+            if (!active) return;
+            const latest = await getInterview(token, evaluatingSession.id);
+            if (latest.status === "completed") {
+              completed = true;
+              break;
+            }
+            if (latest.status !== "evaluating") {
+              throw new Error("Interview evaluation stopped before feedback was ready.");
+            }
+          }
+          if (!completed) {
+            if (active) setNotice({ text: "Feedback is still processing. Check again shortly.", error: false });
+            return;
+          }
+        }
+
+        if (!active) return;
+        const latest = await getInterview(token, evaluatingSession.id);
+        if (latest.status !== "completed") throw new Error("Interview evaluation finished without a completed session.");
+        const results = await getInterviewResults(token, evaluatingSession.id);
+        if (results.evaluations.length === 0) throw new Error("The interview completed without feedback.");
+        if (!active) return;
+        setSession(latest);
+        setEvaluation(results.evaluations);
+        setEvaluationJobId("");
+        setNotice({ text: "Interview feedback is ready.", error: false });
+      } catch (error) {
+        if (active) setNotice({ text: errorMessage(error), error: true });
+      } finally {
+        if (active) setEvaluationLoading(false);
+      }
+    }
+
+    void loadFeedback();
+    return () => { active = false; };
+  }, [evaluationJobId, evaluationRetry, session?.id, session?.status, token]);
 
   async function generate() {
     if (!jobId) { setNotice({ text: "Select a job description.", error: true }); return; }
+    speech.stop();
+    recognition.stop();
     setBusy(true);
     setNotice(null);
+    setQuestions([]);
+    setQuestionSetId("");
     try {
-      const accepted = await generateQuestions(token, jobId, resumeId || undefined, questionCount);
+      const accepted = await generateQuestions(token, jobId, selectedResumeId || undefined, questionCount, interviewType);
       const status = await waitForJob(token, accepted.jobId);
       if (!status.resultId) throw new Error("The question set is not ready yet.");
       const set = await getQuestionSet(token, status.resultId);
+      if (set.questions.length === 0) throw new Error("No interview questions were generated. Try again.");
       setQuestions(set.questions);
       setQuestionSetId(set.id);
-      setNotice({ text: `${set.questions.length} preparation questions generated.`, error: false });
+      setNotice({ text: `${set.questions.length} practice questions are ready.`, error: false });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
     } finally {
@@ -812,17 +968,29 @@ function InterviewSection({ token, resumes, jobs }: { token: string; resumes: Re
     }
   }
 
+  function clearQuestionSet() {
+    setQuestions([]);
+    setQuestionSetId("");
+    setNotice(null);
+  }
+
   async function start() {
-    if (!jobId && questions.length === 0) { setNotice({ text: "Generate questions or select a job description.", error: true }); return; }
+    if (!questionSetId || questions.length === 0) {
+      setNotice({ text: "Generate a question set before starting the interview.", error: true });
+      return;
+    }
+    speech.stop();
+    recognition.stop();
     setBusy(true);
     setNotice(null);
-    setEvaluation(null);
     try {
-      const started = await startInterview(token, questions.length > 0
-        ? { questionSetId }
-        : { jobDescriptionId: jobId });
+      const started = await startInterview(token, { questionSetId });
       setSession(started);
+      setConversation([]);
       setAnswer("");
+      recognition.clearTranscript();
+      setEvaluation(null);
+      setEvaluationJobId("");
       setNotice({ text: "Mock interview started.", error: false });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
@@ -832,21 +1000,34 @@ function InterviewSection({ token, resumes, jobs }: { token: string; resumes: Re
   }
 
   async function submitAnswer() {
-    if (!session || !answer.trim()) return;
+    if (!session || !currentQuestion) return;
+    const submittedAnswer = joinAnswerText(answer, recognition.transcript).trim();
+    if (!submittedAnswer) return;
+    speech.stop();
+    recognition.stop();
+    recognition.clearTranscript();
     setBusy(true);
     setNotice(null);
     try {
-      const result = await answerInterview(token, session.id, answer.trim(), session.currentIndex);
+      const result = await answerInterview(token, session.id, submittedAnswer, session.currentIndex);
+      setConversation((current) => [...current, { question: currentQuestion, answer: submittedAnswer }]);
       setAnswer("");
       if (result.nextQuestion) {
-        setSession(await getInterview(token, session.id));
+        setSession({
+          ...session,
+          currentIndex: result.nextQuestion.index,
+          currentQuestion: result.nextQuestion,
+        });
       } else if (result.status === "completed" && result.evaluation) {
-        setSession({ ...session, status: "completed", currentQuestion: null });
+        setSession({ ...session, currentIndex: session.currentIndex + 1, status: "completed", currentQuestion: null });
         setEvaluation([result.evaluation]);
-        setNotice({ text: "Interview evaluation completed.", error: false });
+        setNotice({ text: "Interview feedback is ready.", error: false });
       } else if (result.status === "evaluating") {
-        setSession({ ...session, status: "evaluating", currentQuestion: null });
-        setNotice({ text: "Final evaluation has been queued.", error: false });
+        setSession({ ...session, currentIndex: session.currentIndex + 1, status: "evaluating", currentQuestion: null });
+        setEvaluationJobId("");
+        setNotice({ text: "Your answers are saved. Preparing feedback…", error: false });
+      } else {
+        throw new Error("The interview response did not include the next question or feedback.");
       }
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
@@ -856,28 +1037,17 @@ function InterviewSection({ token, resumes, jobs }: { token: string; resumes: Re
   }
 
   async function finish() {
-    if (!session) return;
+    if (!session || conversation.length === 0) return;
+    speech.stop();
+    recognition.stop();
+    recognition.clearTranscript();
     setBusy(true);
     setNotice(null);
     try {
-      let latest = await getInterview(token, session.id);
-      let accepted: Awaited<ReturnType<typeof evaluateInterview>> | null = null;
-      if (latest.status === "in_progress") {
-        accepted = await evaluateInterview(token, session.id);
-      }
-      for (let attempt = 0; attempt < 30 && latest.status !== "completed"; attempt += 1) {
-        await delay(1000);
-        latest = await getInterview(token, session.id);
-        if (accepted?.jobId) await getJobStatus(token, accepted.jobId).catch(() => undefined);
-      }
-      if (latest.status === "completed") {
-        const results = await getInterviewResults(token, session.id);
-        setEvaluation(results.evaluations);
-        setSession(latest);
-        setNotice({ text: "Interview evaluation completed.", error: false });
-      } else {
-        setNotice({ text: "Evaluation is still in progress. Refresh the session later.", error: false });
-      }
+      const accepted = await evaluateInterview(token, session.id);
+      setEvaluationJobId(accepted.jobId);
+      setSession({ ...session, status: "evaluating", currentQuestion: null });
+      setNotice({ text: "Your answers are saved. Preparing feedback…", error: false });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
     } finally {
@@ -885,65 +1055,327 @@ function InterviewSection({ token, resumes, jobs }: { token: string; resumes: Re
     }
   }
 
+  function startAnotherInterview() {
+    speech.stop();
+    recognition.stop();
+    recognition.clearTranscript();
+    setSession(null);
+    setConversation([]);
+    setAnswer("");
+    setEvaluation(null);
+    setEvaluationJobId("");
+    setNotice(null);
+  }
+
+  function startRecording() {
+    setAnswer(joinAnswerText(answer, recognition.transcript));
+    recognition.clearTranscript();
+    speech.stop();
+    recognition.start();
+  }
+
+  function stopRecording() {
+    recognition.stop();
+  }
+
   return (
     <div className="workspace-grid">
-      <section className="workspace-panel">
+      <section className="workspace-panel interview-setup" aria-label="Interview setup">
         <h2>Prepare for an interview</h2>
-        <div className="form-stack">
-          <label>Job description<select value={jobId} onChange={(event) => setJobId(event.target.value)}>
+        <p className="supporting-copy">Choose the interview style. Questions use your selected role and shared CV; the AI chooses each question’s difficulty.</p>
+        {jobs.length === 0 ? (
+          <p className="interview-empty-state" role="status">Add a job description in Resume &amp; role before generating interview questions.</p>
+        ) : (
+          <div className="interview-options">
+          <label htmlFor="interview-job">Job description</label>
+          <select id="interview-job" value={jobId} disabled={Boolean(sessionActive) || busy} onChange={(event) => {
+            setJobId(event.target.value);
+            clearQuestionSet();
+          }}>
             <option value="">Select job</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.roleTitle || `Job ${job.id.slice(-6)}`}</option>)}
-          </select></label>
-          <label>CV (optional)<select value={resumeId} onChange={(event) => setResumeId(event.target.value)}>
-            <option value="">No CV</option>{resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.title || resume.originalFileName}</option>)}
-          </select></label>
-          <label>Question count<input type="number" min={1} max={20} value={questionCount} onChange={(event) => setQuestionCount(Number(event.target.value))} /></label>
-          <button className="secondary" type="button" disabled={busy} onClick={() => void generate()}>{busy ? "Generating…" : "Generate question bank"}</button>
-        </div>
-        {questions.length > 0 && (
-          <ol className="question-bank">
-            {questions.map((question) => <li key={question.id}><strong>{question.category} · {question.difficulty}</strong><p>{question.text}</p></li>)}
-          </ol>
+          </select>
+          <label htmlFor="interview-type">Interview type</label>
+          <select id="interview-type" value={interviewType} disabled={Boolean(sessionActive) || busy} onChange={(event) => {
+            const nextType = parseInterviewType(event.target.value);
+            if (!nextType) {
+              setNotice({ text: "Choose a valid interview type.", error: true });
+              return;
+            }
+            setInterviewType(nextType);
+            if (nextType === "both") setQuestionCount((count) => Math.max(2, count));
+            clearQuestionSet();
+          }}>
+            <option value="technical">Technical</option>
+            <option value="behavioral">Behavioural</option>
+            <option value="both">Both</option>
+          </select>
+          <p className="interview-resume-context">
+            Using CV: <strong>{selectedResume ? (selectedResume.title || selectedResume.originalFileName) : "None — choose or upload one in Resume & role"}</strong>
+          </p>
+          <label htmlFor="interview-question-count">Number of questions</label>
+          <input
+            id="interview-question-count"
+            type="number"
+            min={interviewType === "both" ? 2 : 1}
+            max={20}
+            value={questionCount}
+            disabled={Boolean(sessionActive) || busy}
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (Number.isInteger(value)) {
+                setQuestionCount(Math.min(20, Math.max(interviewType === "both" ? 2 : 1, value)));
+                clearQuestionSet();
+              }
+            }}
+          />
+          <button className="secondary" type="button" disabled={busy || Boolean(sessionActive) || !jobId} onClick={() => void generate()}>
+            {busy ? "Generating…" : "Generate interview questions"}
+          </button>
+          </div>
         )}
+        {questions.length > 0 && (
+          <details className="interview-question-bank">
+            <summary>{questions.length} generated questions</summary>
+            <ol>
+            {questions.map((question) => <li key={question.id}><strong>{interviewQuestionTypeLabel(question.type)} · {question.category} · {question.difficulty}</strong><p>{question.text}</p></li>)}
+            </ol>
+          </details>
+        )}
+        <fieldset className="interview-speech-settings">
+          <legend>Interviewer voice</legend>
+          <label className="interview-checkbox">
+            <input
+              type="checkbox"
+              checked={autoRead}
+              disabled={!speech.available}
+              onChange={(event) => {
+                if (!event.target.checked) speech.stop();
+                setAutoRead(event.target.checked);
+              }}
+            />
+            Auto-read questions and feedback
+          </label>
+          {speech.voices.length > 0 && (
+            <label htmlFor="interview-voice">
+              Voice
+              <select id="interview-voice" value={voiceURI} onChange={(event) => setVoiceURI(event.target.value)}>
+                <option value="">Browser default</option>
+                {speech.voices.map((voice) => (
+                  <option key={voice.voiceURI} value={voice.voiceURI}>
+                    {voice.name} ({voice.lang}){voice.default ? " · default" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <p className="interview-speech-status" role="status" aria-live="polite">
+            {speech.error ?? (speech.available
+              ? "Speech is optional; all questions and feedback remain available as text."
+              : "Speech synthesis is unavailable in this browser. You can still read and answer questions.")}
+          </p>
+        </fieldset>
       </section>
-      <section className="workspace-panel" aria-live="polite">
-        <h2>Mock interview room</h2>
+      <section className="workspace-panel interview-room" aria-label="Interview practice">
+        <h2>AI interviewer</h2>
+        {activeJob && <p className="interview-role-context">Practice for <strong>{activeJob.roleTitle || "your selected role"}</strong></p>}
+        {notice && <p className={`notice${notice.error ? " error" : ""}`} role={notice.error ? "alert" : "status"} aria-live="polite">{notice.text}</p>}
         {session ? (
           <>
-            <p className="supporting-copy">Session status: {session.status} · Question {session.currentIndex + 1}</p>
-            {session.status === "in_progress" && session.currentQuestion ? (
+            <div className="interview-progress">
+              <div><span>Interview progress</span><strong>{conversation.length} of {questions.length} answered</strong></div>
+              <progress
+                aria-label={`Interview questions answered: ${conversation.length} of ${questions.length}`}
+                max={Math.max(questions.length, 1)}
+                value={conversation.length}
+              >
+                {conversation.length} of {questions.length}
+              </progress>
+            </div>
+            {conversation.length > 0 && (
+              <div className="interview-transcript" aria-label="Conversation so far">
+                {conversation.map((entry, index) => (
+                  <article className="interview-exchange" key={`${entry.question.id}-${index}`}>
+                    <p className="interview-speaker">Interviewer · {index + 1}</p>
+                    <p className="interview-transcript-question">{entry.question.text}</p>
+                    <p className="interview-speaker">Your answer</p>
+                    <p className="interview-transcript-answer">{entry.answer}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+            {session.status === "in_progress" && currentQuestion ? (
               <>
-                <h3>{session.currentQuestion.text}</h3>
-                <textarea rows={7} maxLength={20000} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Write your answer…" />
-                <div className="actions">
-                  <button className="primary" type="button" disabled={busy || !answer.trim()} onClick={() => void submitAnswer()}>{busy ? "Submitting…" : "Submit answer"}</button>
-                  <button className="secondary" type="button" disabled={busy} onClick={() => void finish()}>Finish and evaluate</button>
+                <article className="interview-current-question" aria-live="polite">
+                  <p className="eyebrow">Question {session.currentIndex + 1} of {questions.length}</p>
+                  <p className="interview-question-meta">{interviewQuestionTypeLabel(currentQuestion.type)} <span>·</span> {currentQuestion.category} <span>·</span> {currentQuestion.difficulty} difficulty</p>
+                  <h3>{currentQuestion.text}</h3>
+                  <SpeechControls speech={speech} text={currentQuestion.text} voiceURI={voiceURI} label="question" />
+                </article>
+                <p className="interview-answer-guidance">
+                  {currentQuestion.type === "technical"
+                    ? "Type your technical answer and explain your approach."
+                    : "Record your behavioural answer for transcription, or type it below."}
+                </p>
+                <label className="interview-answer-label" htmlFor="interview-answer">Your answer</label>
+                <textarea
+                  id="interview-answer"
+                  rows={7}
+                  maxLength={20000}
+                  value={answerWithTranscript}
+                  readOnly={recognition.isListening}
+                  onChange={(event) => {
+                    recognition.clearTranscript();
+                    setAnswer(event.target.value);
+                  }}
+                  placeholder={currentQuestion.type === "technical"
+                    ? "Type your technical answer, approach, and reasoning…"
+                    : "Record your answer or type it here…"}
+                />
+                <div className="interview-recognition-controls">
+                  <button
+                    className="secondary"
+                    type="button"
+                    disabled={!recognition.available || recognition.isListening || busy}
+                    onClick={startRecording}
+                  >
+                    Record answer
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    disabled={!recognition.isListening || busy}
+                    onClick={stopRecording}
+                  >
+                    Stop recording
+                  </button>
+                  <p role="status" aria-live="polite">
+                    {recognition.error ?? (recognition.available
+                      ? "Speech-to-text uses your browser’s speech service; microphone access may be requested."
+                      : "Speech-to-text is unavailable in this browser. You can type your answer.")}
+                  </p>
                 </div>
+                <div className="actions">
+                  <button className="primary" type="button" disabled={busy || recognition.isListening || !joinAnswerText(answer, recognition.transcript).trim()} onClick={() => void submitAnswer()}>{busy ? "Submitting…" : "Submit answer"}</button>
+                  <button className="secondary" type="button" disabled={busy || recognition.isListening || conversation.length === 0 || Boolean(joinAnswerText(answer, recognition.transcript).trim())} onClick={() => void finish()}>Finish and get feedback</button>
+                </div>
+                {joinAnswerText(answer, recognition.transcript).trim() && <p className="supporting-copy">Submit or clear your current answer before finishing; unsent text is not included in feedback.</p>}
               </>
             ) : session.status === "evaluating" ? (
               <>
-                <p>Evaluation is in progress. It may take a moment.</p>
-                <button className="secondary" type="button" disabled={busy} onClick={() => void finish()}>Check evaluation</button>
+                <p className="interview-evaluation-state" role="status" aria-live="polite">
+                  {evaluationLoading ? "Reviewing your answers and preparing feedback…" : "Your interview is complete. Feedback is still processing."}
+                </p>
+                {!evaluationLoading && (
+                  <button className="secondary" type="button" onClick={() => setEvaluationRetry((count) => count + 1)}>
+                    Check feedback
+                  </button>
+                )}
               </>
-            ) : null}
+            ) : session.status === "completed" ? (
+              <button className="secondary" type="button" onClick={startAnotherInterview}>Start another practice interview</button>
+            ) : (
+              <p className="supporting-copy">This session is no longer accepting answers. Start a new practice interview when ready.</p>
+            )}
+            {evaluation && (
+              <EvaluationReport
+                evaluations={evaluation}
+                speech={speech}
+                voiceURI={voiceURI}
+                speechText={feedbackText}
+              />
+            )}
           </>
         ) : (
-          <button className="primary" type="button" disabled={busy || (!jobId && questions.length === 0)} onClick={() => void start()}>{busy ? "Starting…" : "Start mock interview"}</button>
+          <div className="interview-empty-state">
+            <p className="eyebrow">Practice session</p>
+            <h3>One question at a time</h3>
+            <p>Choose a job description, generate questions, then begin your practice session.</p>
+            <button className="primary" type="button" disabled={busy || !questionSetId || questions.length === 0} onClick={() => void start()}>
+              {busy ? "Starting…" : "Start interview"}
+            </button>
+          </div>
         )}
-        {notice && <p className={`notice${notice.error ? " error" : ""}`}>{notice.text}</p>}
-        {evaluation && <EvaluationReport evaluations={evaluation} />}
       </section>
     </div>
   );
 }
 
-function EvaluationReport({ evaluations }: { evaluations: InterviewEvaluation[] }) {
+type InterviewSpeech = ReturnType<typeof useInterviewSpeech>;
+
+function SpeechControls({
+  speech,
+  text,
+  voiceURI,
+  label,
+}: {
+  speech: InterviewSpeech;
+  text: string;
+  voiceURI: string;
+  label: string;
+}) {
   return (
-    <section className="result-section">
-      <p className="eyebrow">AI-generated · reviewed by coach where flagged</p>
+    <div className="interview-speech-controls">
+      <button className="secondary" type="button" disabled={!speech.available || !text.trim()} onClick={() => speech.speak(text, voiceURI)}>
+        Speak {label}
+      </button>
+      <button className="secondary" type="button" disabled={!speech.isSpeaking} onClick={speech.stop}>
+        Stop speaking
+      </button>
+    </div>
+  );
+}
+
+function evaluationSpeechText(evaluations: InterviewEvaluation[]) {
+  return evaluations.map((evaluation) => [
+    `Overall score: ${evaluation.overallScore} percent.`,
+    `Strengths: ${evaluation.strengths.join(". ") || "No specific strengths recorded."}.`,
+    `Improvement areas and next steps: ${evaluation.improvements.join(". ") || "No specific improvement areas recorded."}.`,
+    evaluation.exampleAnswer ? `Example answer: ${evaluation.exampleAnswer}` : "",
+  ].filter(Boolean).join(" ")).join(" ");
+}
+
+function joinAnswerText(...parts: string[]) {
+  return parts.map((part) => part.trim()).filter(Boolean).join(" ");
+}
+
+function interviewQuestionTypeLabel(type?: InterviewQuestion["type"]) {
+  if (type === "technical") return "Technical";
+  if (type === "behavioral") return "Behavioural";
+  return "Interview";
+}
+
+function parseInterviewType(value: string): InterviewType | null {
+  if (value === "technical" || value === "behavioral" || value === "both") return value;
+  return null;
+}
+
+function EvaluationReport({
+  evaluations,
+  speech,
+  voiceURI,
+  speechText,
+}: {
+  evaluations: InterviewEvaluation[];
+  speech: InterviewSpeech;
+  voiceURI: string;
+  speechText: string;
+}) {
+  return (
+    <section className="result-section interview-feedback" aria-label="Interview feedback">
+      <div className="interview-feedback-heading">
+        <div>
+          <p className="eyebrow">AI-generated feedback · coach review where flagged</p>
+          <h2>Your interview feedback</h2>
+        </div>
+        <SpeechControls speech={speech} text={speechText} voiceURI={voiceURI} label="feedback" />
+      </div>
       {evaluations.map((evaluation, index) => (
         <article key={evaluation.rubricVersion + index}>
-          <h2>Overall score: {evaluation.overallScore}%</h2>
-          <h3>Rubric</h3>
+          <h3>Overall score: {evaluation.overallScore}%</h3>
+          <p className="supporting-copy">
+            AI confidence: {Math.round(evaluation.confidence * 100)}% · Review status: {evaluation.reviewStatus.replaceAll("_", " ")}
+          </p>
+          <h3>Feedback by skill</h3>
           <div className="score-grid">
             {evaluation.dimensionFeedback.map((dimension) => (
               <div key={dimension.dimension}>
@@ -955,7 +1387,7 @@ function EvaluationReport({ evaluations }: { evaluations: InterviewEvaluation[] 
           </div>
           <h3>Strengths</h3>
           <SkillList items={evaluation.strengths} />
-          <h3>Improvements</h3>
+          <h3>Improvement areas and actionable next steps</h3>
           <SkillList items={evaluation.improvements} />
           {evaluation.exampleAnswer && <><h3>Example answer</h3><blockquote>{evaluation.exampleAnswer}</blockquote></>}
         </article>

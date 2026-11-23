@@ -1275,12 +1275,9 @@ paths:
       summary: List user and role metadata
       description: Does not return resumes, answers, or other candidate content.
       x-roles: [admin]
-      parameters:
-        - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
       responses:
         "200":
-          description: User metadata page
+          description: Up to 200 user records
           content:
             application/json:
               schema:
@@ -1292,16 +1289,117 @@ paths:
                   data:
                     type: object
                     properties:
-                      items:
+                      users:
                         type: array
                         items:
                           $ref: "#/components/schemas/User"
-                      nextCursor:
-                        type: [string, "null"]
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    post:
+      tags: [Administration]
+      summary: Register a coach account
+      description: Creates a coach directly. Candidate self-registration cannot select a role.
+      x-roles: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+                password:
+                  type: string
+                  minLength: 12
+                  maxLength: 128
+      responses:
+        "201":
+          description: Coach account created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [user]
+                    properties:
+                      user:
+                        $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /admin/users/{userId}/status:
+    patch:
+      tags: [Administration]
+      summary: Activate or deactivate a candidate or coach account
+      description: Deactivated accounts cannot sign in or use existing access tokens. Admin accounts are managed through controlled provisioning.
+      x-roles: [admin]
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ObjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [active, disabled]
+      responses:
+        "200":
+          description: Account status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [user]
+                    properties:
+                      user:
+                        $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/ServerError"
 
@@ -1384,12 +1482,9 @@ paths:
       tags: [Administration]
       summary: Query restricted audit metadata
       x-roles: [admin]
-      parameters:
-        - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
       responses:
         "200":
-          description: Audit log page without candidate content
+          description: The latest 250 metadata-only audit events
           content:
             application/json:
               schema:
@@ -1405,27 +1500,31 @@ paths:
                         type: array
                         items:
                           type: object
-                          required: [action, resourceType, createdAt, requestId]
+                          required: [id, actorEmail, subjectEmail, action, targetType, previousRole, newRole, previousStatus, newStatus, createdAt, requestId]
                           properties:
-                            actorUserId:
-                              oneOf:
-                                - $ref: "#/components/schemas/ObjectId"
-                                - type: "null"
+                            id:
+                              $ref: "#/components/schemas/ObjectId"
+                            actorEmail:
+                              type: [string, "null"]
+                            subjectEmail:
+                              type: [string, "null"]
                             action:
                               type: string
-                            resourceType:
-                              type: string
-                            resourceId:
-                              oneOf:
-                                - $ref: "#/components/schemas/ObjectId"
-                                - type: "null"
+                            targetType:
+                              type: [string, "null"]
+                            previousRole:
+                              type: [string, "null"]
+                            newRole:
+                              type: [string, "null"]
+                            previousStatus:
+                              type: [string, "null"]
+                            newStatus:
+                              type: [string, "null"]
                             createdAt:
                               type: string
                               format: date-time
                             requestId:
-                              type: string
-                      nextCursor:
-                        type: [string, "null"]
+                              type: [string, "null"]
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1497,7 +1596,7 @@ components:
           type: string
     User:
       type: object
-      required: [id, email, role, createdAt]
+      required: [id, email, role, status, createdAt]
       properties:
         id:
           $ref: "#/components/schemas/ObjectId"
@@ -1507,7 +1606,13 @@ components:
         role:
           type: string
           enum: [candidate, coach, admin]
+        status:
+          type: string
+          enum: [active, disabled]
         createdAt:
+          type: string
+          format: date-time
+        updatedAt:
           type: string
           format: date-time
     RegisterRequest:
@@ -1804,6 +1909,10 @@ components:
           minimum: 1
           maximum: 20
           default: 8
+        interviewType:
+          type: string
+          enum: [technical, behavioral, both]
+          default: both
     StartInterviewRequest:
       type: object
       additionalProperties: false
@@ -1815,7 +1924,7 @@ components:
           $ref: "#/components/schemas/ObjectId"
     InterviewQuestion:
       type: object
-      required: [id, text, category, index]
+      required: [id, text, category, difficulty, index]
       properties:
         id:
           $ref: "#/components/schemas/ObjectId"
@@ -1823,6 +1932,13 @@ components:
           type: string
         category:
           type: string
+        type:
+          type: string
+          enum: [technical, behavioral]
+          description: Omitted for questions generated before interview types were added.
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
         index:
           type: integer
           minimum: 0

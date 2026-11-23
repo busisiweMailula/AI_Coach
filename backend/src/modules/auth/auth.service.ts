@@ -29,6 +29,7 @@ export async function registerCandidate(input: z.infer<typeof registerSchema>) {
     email,
     passwordHash: await bcrypt.hash(input.password, 12),
     role: "candidate",
+    status: "active",
     createdAt: now,
     updatedAt: now,
   };
@@ -53,7 +54,9 @@ export async function login(input: z.infer<typeof loginSchema>) {
     ? await bcrypt.compare(input.password, user.passwordHash)
     : await bcrypt.compare(input.password, "$2a$12$C6UzMDM.H6dfI/f/IKcEe.5Jx9qR.2IhW7Z6kD3n6QDxgZpE7fK6e");
 
-  if (!user || !validPassword) throw new UnauthorizedError("Invalid email or password");
+  if (!user || user.status === "disabled" || !validPassword) {
+    throw new UnauthorizedError("Invalid email or password");
+  }
 
   const safeUser = publicUser(user);
   return {
@@ -71,6 +74,7 @@ export function publicUser(user: UserDocument) {
     id: user._id.toHexString(),
     email: user.email,
     role: user.role,
+    status: user.status ?? "active",
     createdAt: user.createdAt.toISOString(),
   };
 }

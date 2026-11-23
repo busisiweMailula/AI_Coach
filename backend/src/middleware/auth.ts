@@ -38,6 +38,7 @@ export const authMiddleware: RequestHandler = (req, _res, next) => {
   const match = authorization?.match(/^Bearer ([^\s]+)$/);
   if (!match) return next(new UnauthorizedError("Missing or invalid bearer token"));
 
+  let auth: AuthContext;
   try {
     const payload = jwt.verify(match[1], env.JWT_SECRET, {
       algorithms: ["HS256"],
@@ -49,15 +50,30 @@ export const authMiddleware: RequestHandler = (req, _res, next) => {
       return next(new UnauthorizedError("Invalid or expired token"));
     }
 
-    req.auth = {
+    auth = {
       userId: claims.data.sub,
       email: claims.data.email,
       role: claims.data.role,
     };
-    return next();
   } catch {
     return next(new UnauthorizedError("Invalid or expired token"));
   }
+
+  if (!ObjectId.isValid(auth.userId)) {
+    req.auth = auth;
+    return next();
+  }
+
+  void getDb().collection<UserDocument>("users")
+    .findOne({ _id: new ObjectId(auth.userId) }, { projection: { status: 1 } })
+    .then((user) => {
+      if (user?.status === "disabled") {
+        next(new UnauthorizedError("This account has been deactivated"));
+        return;
+      }
+      req.auth = auth;
+      next();
+    }, next);
 };
 
 export function requireRole(...roles: UserRole[]): RequestHandler {

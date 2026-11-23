@@ -32,6 +32,7 @@ export interface AuthUser {
   id: string;
   email: string;
   role: UserRole;
+  status: "active" | "disabled";
   createdAt: string;
 }
 
@@ -43,8 +44,23 @@ export interface AdminUser {
   id: string;
   email: string;
   role: UserRole;
+  status: "active" | "disabled";
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AdminAuditLog {
+  id: string;
+  actorEmail: string | null;
+  subjectEmail: string | null;
+  action: string;
+  targetType: string | null;
+  previousRole: string | null;
+  newRole: string | null;
+  previousStatus: string | null;
+  newStatus: string | null;
+  createdAt: string;
+  requestId: string | null;
 }
 
 export interface ReviewItem {
@@ -198,9 +214,12 @@ export interface InterviewQuestion {
   id: string;
   text: string;
   category: string;
+  type?: "technical" | "behavioral";
   difficulty: "easy" | "medium" | "hard";
   index: number;
 }
+
+export type InterviewType = "technical" | "behavioral" | "both";
 
 export interface InterviewSession {
   id: string;
@@ -439,6 +458,7 @@ export function generateQuestions(
   jobDescriptionId: string,
   resumeId: string | undefined,
   questionCount: number,
+  interviewType: InterviewType = "both",
 ): Promise<AcceptedJob> {
   return request("/api/v1/interviews/generate", {
     token,
@@ -447,6 +467,7 @@ export function generateQuestions(
       jobDescriptionId,
       ...(resumeId ? { resumeId } : {}),
       questionCount,
+      interviewType,
     }),
   });
 }
@@ -527,10 +548,29 @@ export function getAdminUsers(token: string): Promise<{ users: AdminUser[] }> {
   return request("/api/v1/admin/users", { token });
 }
 
-export function updateAdminUserRole(token: string, userId: string, role: "candidate" | "coach"): Promise<{ user: AdminUser }> {
-  return request(`/api/v1/admin/users/${encodeURIComponent(userId)}/role`, {
+export function registerCoach(
+  token: string,
+  input: { email: string; password: string },
+): Promise<{ user: AdminUser }> {
+  return request("/api/v1/admin/users", {
+    token,
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateAdminUserStatus(
+  token: string,
+  userId: string,
+  status: "active" | "disabled",
+): Promise<{ user: AdminUser }> {
+  return request(`/api/v1/admin/users/${encodeURIComponent(userId)}/status`, {
     token,
     method: "PATCH",
-    body: JSON.stringify({ role }),
+    body: JSON.stringify({ status }),
   });
+}
+
+export function getAdminAuditLogs(token: string): Promise<{ items: AdminAuditLog[] }> {
+  return request("/api/v1/admin/audit-logs", { token });
 }

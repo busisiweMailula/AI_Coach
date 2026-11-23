@@ -8,6 +8,7 @@ export interface UserDocument {
   email: string;
   passwordHash: string;
   role: UserRole;
+  status?: "active" | "disabled";
   createdAt: Date;
   updatedAt: Date;
 }

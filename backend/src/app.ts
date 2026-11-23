@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import { errorHandler } from "./middleware/error-handler.js";
 import { apiRateLimiter } from "./middleware/rate-limit.js";
+import { auditSuccessfulMutations } from "./middleware/audit-mutations.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
 import { requestLogger } from "./middleware/request-logger.js";
 import { env } from "./config/env.js";
@@ -26,6 +27,7 @@ export function createApp() {
   app.use(requestIdMiddleware);
   app.use(requestLogger);
   app.use(express.json({ limit: "1mb", strict: true }));
+  app.use(auditSuccessfulMutations);
   app.use(apiRateLimiter);
 
   app.use("/api/v1/health", healthRouter);

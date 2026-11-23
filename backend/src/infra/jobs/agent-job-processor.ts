@@ -373,24 +373,53 @@ async function generateQuestions(job: AsyncJobDocument): Promise<{ type: string;
       : Promise.resolve(null),
   ]);
   if ((resumeId && !resume) || !description) throw new NotFoundError("Resume or job description not found");
+  const requestedCount = Number(job.payload?.questionCount ?? "8");
+  if (!Number.isSafeInteger(requestedCount) || requestedCount < 1 || requestedCount > 20) {
+    throw new ValidationError("Question count is invalid");
+  }
+  const interviewType = job.payload?.interviewType ?? "both";
+  if (interviewType !== "technical" && interviewType !== "behavioral" && interviewType !== "both") {
+    throw new ValidationError("Interview type is invalid");
+  }
   const anonymizedResumeText = resume
     ? await prepareResumeTextForAI(job.ownerId.toHexString(), resume.extractedText)
     : null;
   const run = await runAgent({
     ownerId: job.ownerId,
     task: "question_generator",
-    promptVersion: "question-generator-v1",
-    input: { resumeText: anonymizedResumeText, jobDescriptionText: description.normalizedText },
+    promptVersion: "question-generator-v2",
+    input: {
+      resumeText: anonymizedResumeText,
+      jobDescriptionText: description.normalizedText,
+      questionCount: requestedCount,
+      interviewType,
+    },
+    instructions: [
+      `Generate exactly ${requestedCount} interview questions.`,
+      interviewType === "both"
+        ? "Include a balanced mix of technical and behavioral questions, alternating types where practical."
+        : `Every question must be of type "${interviewType}".`,
+      "Technical questions should assess role-relevant technical knowledge, problem solving, design, or implementation.",
+      "Behavioral questions should ask about a candidate's past actions and outcomes, suitable for a structured STAR-style answer.",
+      'For each question, set "type" to either "technical" or "behavioral".',
+    ].join(" "),
     schema: QuestionsSchema,
     requiresResumeProcessingConsent: Boolean(resumeId),
   });
   const setId = new ObjectId();
   const questionIds: ObjectId[] = [];
-  const requestedCount = Number(job.payload?.questionCount ?? "8");
-  if (!Number.isSafeInteger(requestedCount) || requestedCount < 1 || requestedCount > 20) {
-    throw new ValidationError("Question count is invalid");
+  const generatedQuestions = run.value.questions.slice(0, requestedCount);
+  if (generatedQuestions.length !== requestedCount) {
+    throw new ValidationError("The AI did not generate the requested number of interview questions");
   }
-  for (const question of run.value.questions.slice(0, requestedCount)) {
+  if (interviewType !== "both" && generatedQuestions.some((question) => question.type !== interviewType)) {
+    throw new ValidationError("The AI did not generate the requested interview question type");
+  }
+  if (interviewType === "both" && requestedCount > 1 &&
+      new Set(generatedQuestions.map((question) => question.type)).size !== 2) {
+    throw new ValidationError("The AI did not generate both technical and behavioral interview questions");
+  }
+  for (const question of generatedQuestions) {
     const questionId = new ObjectId();
     const document: InterviewQuestionDocument = {
       _id: questionId,

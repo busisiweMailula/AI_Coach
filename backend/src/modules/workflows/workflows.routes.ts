@@ -31,7 +31,16 @@ const questionSchema = z.object({
   jobDescriptionId: z.string().regex(/^[\da-f]{24}$/i),
   resumeId: z.string().regex(/^[\da-f]{24}$/i).optional(),
   questionCount: z.number().int().min(1).max(20).default(8),
-}).strict();
+  interviewType: z.enum(["technical", "behavioral", "both"]).default("both"),
+}).strict().superRefine((request, context) => {
+  if (request.interviewType === "both" && request.questionCount < 2) {
+    context.addIssue({
+      code: "custom",
+      path: ["questionCount"],
+      message: "At least two questions are required for both interview types",
+    });
+  }
+});
 
 const guidanceSchema = z.object({ skillGapId: z.string().regex(/^[\da-f]{24}$/i) }).strict();
 const decisionSchema = z.object({ decision: z.enum(["accept", "reject"]) }).strict();
@@ -251,6 +260,7 @@ workflowsRouter.post(
         jobDescriptionId: req.body.jobDescriptionId,
         ...(req.body.resumeId ? { resumeId: req.body.resumeId } : {}),
         questionCount: String(req.body.questionCount),
+        interviewType: req.body.interviewType,
       },
     });
     res.status(202).json({ success: true, data: acceptedJob(job._id, job.resultId) });
@@ -398,12 +408,14 @@ function questionResponse(question: {
   _id: ObjectId;
   prompt: string;
   competency: string;
+  type?: "technical" | "behavioral";
   difficulty: string;
 }, index: number) {
   return {
     id: question._id.toHexString(),
     text: question.prompt,
     category: question.competency,
+    type: question.type,
     difficulty: question.difficulty,
     index,
   };

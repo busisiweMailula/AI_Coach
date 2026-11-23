@@ -104,7 +104,10 @@ export default function App() {
                   <span className="secure-label">
                     {role === "coach" ? "Coach review portal" : role === "admin" ? "Admin account portal" : "Private candidate workspace"}
                   </span>
-                  {token && <button className="text-button" type="button" onClick={signOut}>Sign out</button>}
+                  <span className="header-account-email">{email}</span>
+                  <button className="header-signout-button" type="button" title="Sign out" aria-label="Sign out" onClick={signOut}>
+                    <span aria-hidden="true">↪</span>
+                  </button>
                 </div>
               </header>
             )}

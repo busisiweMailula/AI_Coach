@@ -94,12 +94,24 @@ class TestMockProvider implements LlmProvider {
       return mockCompletion(request, { suggestions: [] });
     }
     if (request.task === "question_generator") {
+      const questionCount = Number(input.questionCount ?? 8);
+      const interviewType = input.interviewType === "technical" || input.interviewType === "behavioral"
+        ? input.interviewType
+        : "both";
       return mockCompletion(request, {
-        questions: [{
-          prompt: "Describe how you would approach a relevant challenge in this role.",
-          competency: "problem solving",
-          difficulty: "medium",
-        }],
+        questions: Array.from({ length: questionCount }, (_, index) => {
+          const type = interviewType === "both"
+            ? index % 2 === 0 ? "technical" : "behavioral"
+            : interviewType;
+          return {
+            prompt: type === "technical"
+              ? "How would you design and test a reliable solution for a challenge in this role?"
+              : "Tell me about a time you handled a challenging situation at work.",
+            competency: type === "technical" ? "technical problem solving" : "behavioral experience",
+            type,
+            difficulty: "medium",
+          };
+        }),
       });
     }
     if (request.task === "answer_evaluator") {

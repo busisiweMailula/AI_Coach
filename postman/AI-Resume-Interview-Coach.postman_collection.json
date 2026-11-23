@@ -357,13 +357,13 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["if (pm.response.code === 200) {", "  const users = pm.response.json().data.users;", "  const candidate = users.find(function (user) { return user.role === 'candidate'; });", "  if (candidate) pm.collectionVariables.set('userId', candidate.id);", "}"] } }]
         },
         {
-          "name": "Change user role",
+          "name": "Deactivate user",
           "request": {
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"role\": \"coach\"\n}", "options": { "raw": { "language": "json" } } },
-            "url": "{{apiBaseUrl}}/admin/users/{{userId}}/role",
-            "description": "Use only in a test environment; change role back to candidate as needed."
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"disabled\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{apiBaseUrl}}/admin/users/{{userId}}/status",
+            "description": "Use only in a test environment. Set status to active to reactivate the account."
           }
         }
       ]

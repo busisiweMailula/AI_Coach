@@ -70,6 +70,7 @@ export interface InterviewQuestionDocument {
   questionSetId: ObjectId | null;
   prompt: string;
   competency: string;
+  type?: "technical" | "behavioral";
   difficulty: "easy" | "medium" | "hard";
   createdAt: Date;
 }
