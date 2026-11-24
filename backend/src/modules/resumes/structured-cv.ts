@@ -272,16 +272,63 @@ function splitBulletLines(line: CvSourceLine): CvSourceLine[] {
   if (line.kind === "bullet") return [line];
   if (!/[•▪●◦]/.test(line.text)) return [line];
   const [before, ...bullets] = line.text.split(/[•▪●◦]\s*/);
+  const expandedBullets: CvSourceLine[] = [];
+  for (const bullet of bullets) {
+    const dateIndex = bullet.search(dateRange);
+    if (dateIndex > 0) {
+      const boundary = bullet.slice(0, dateIndex).lastIndexOf(". ");
+      if (boundary >= 0) {
+        const bulletText = bullet.slice(0, boundary + 1).trim();
+        const entryText = bullet.slice(boundary + 2).trim();
+        if (bulletText) expandedBullets.push({ ...line, text: bulletText, kind: "bullet" });
+        if (entryText) expandedBullets.push({ ...line, text: entryText, kind: "paragraph" });
+        continue;
+      }
+    }
+    if (bullet.trim()) expandedBullets.push({ ...line, text: bullet.trim(), kind: "bullet" });
+  }
   return [
     ...(before.trim() ? [{ ...line, text: before.trim() }] : []),
-    ...bullets.map((text) => ({ ...line, text: text.trim(), kind: "bullet" as const }))
-      .filter((bullet) => bullet.text.length > 0),
+    ...expandedBullets,
   ];
 }
 
 function splitEntryBoundaries(line: CvSourceLine): CvSourceLine[] {
+  if (line.kind !== "bullet" && dateRange.test(line.text)) {
+    const dateMatch = dateRange.exec(line.text);
+    if (dateMatch) {
+      const dateIndex = dateMatch.index;
+      const boundary = line.text.slice(0, dateIndex).lastIndexOf(". ");
+      if (boundary >= 0) {
+        const prefix = line.text.slice(0, boundary + 1).trim();
+        const rest = line.text.slice(boundary + 2).trim();
+        if (prefix && rest) {
+          return [
+            { ...line, text: prefix, kind: "paragraph" },
+            { ...line, text: rest, kind: "paragraph" },
+          ];
+        }
+      }
+    }
+  }
   if (line.kind !== "bullet") return [line];
   if (parseEntryHeading(line.text)) return [{ ...line, kind: "paragraph" }];
+  const secondDateIndex = line.text.search(/(?:\b(?:19|20)\d{2}\b\s*(?:[–—-]|to)\s*(?:present|current|(?:19|20)\d{2}))\b/i);
+  if (secondDateIndex > 0) {
+    const boundary = line.text.slice(0, secondDateIndex).lastIndexOf(". ");
+    if (boundary >= 0) {
+      const firstBullet = line.text.slice(0, boundary + 1).trim();
+      const secondPart = line.text.slice(boundary + 2).trim();
+      const marker = secondPart.indexOf("•");
+      const secondEntry = marker >= 0 ? secondPart.slice(0, marker).trim() : secondPart;
+      const secondBullet = marker >= 0 ? secondPart.slice(marker).trim().replace(/^[•▪●◦]\s*/, "") : "";
+      return [
+        ...(firstBullet ? [{ ...line, text: firstBullet, kind: "bullet" as const }] : []),
+        ...(secondEntry ? [{ ...line, text: secondEntry, kind: "paragraph" as const }] : []),
+        ...(secondBullet ? [{ ...line, text: secondBullet, kind: "bullet" as const }] : []),
+      ];
+    }
+  }
   const dateIndex = line.text.search(dateRange);
   if (dateIndex < 0) return [line];
   const boundary = Math.max(line.text.lastIndexOf(". ", dateIndex), line.text.lastIndexOf("; ", dateIndex));
@@ -659,6 +706,7 @@ function normalizeHeading(value: string): string {
 
 function normalizeForCoverage(value: string): string {
   return value.replace(/\u0000/g, " ").replace(/^[ \t]*(?:[•▪●◦*-])\s+/gm, "")
+    .replace(/[•▪●◦]\s*/g, "")
     .replace(/^[A-Z][A-Z &/,-]*\s+\(CONTINUED\)\s*$/gim, "")
     .replace(/\(CONTINUED\)/gi, "")
     .replace(/\s+/g, " ").trim();

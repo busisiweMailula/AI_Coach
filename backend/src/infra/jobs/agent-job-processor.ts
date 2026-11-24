@@ -36,6 +36,7 @@ import type {
 import { createReviewItem, shouldEscalate } from "../../modules/reviews/reviews.service.js";
 import { ensureExternalModelConsent } from "../../modules/privacy/privacy.service.js";
 import { findRelevantResumeEvidence } from "../embeddings/resume-semantic-search.js";
+import { roundToTwoDecimalPlaces } from "../../common/rounding.js";
 import {
   deriveSuggestionTarget,
   structureCv,
@@ -514,16 +515,21 @@ async function evaluateInterview(job: AsyncJobDocument): Promise<{ type: string;
     version: string;
     dimensions: Array<{ id: string; weight: number }>;
   };
-  const dimensionScores = new Map(run.value.dimensions.map((item) => [item.dimension, item.score]));
-  const overallScore = rubric.dimensions.reduce(
+  const roundedDimensions = run.value.dimensions.map((item) => ({
+    ...item,
+    score: roundToTwoDecimalPlaces(item.score),
+  }));
+  const dimensionScores = new Map(roundedDimensions.map((item) => [item.dimension, item.score]));
+  const overallScore = roundToTwoDecimalPlaces(rubric.dimensions.reduce(
     (score, dimension) => score + (dimensionScores.get(dimension.id as typeof run.value.dimensions[number]["dimension"]) ?? 0) * dimension.weight,
     0,
-  );
+  ));
   const evaluation: InterviewEvaluationDocument = {
     _id: evaluationId,
     ownerId: job.ownerId,
     sessionId,
     ...run.value,
+    dimensions: roundedDimensions,
     rubricVersion: rubric.version,
     overallScore,
     executionId: run.executionId,
@@ -560,7 +566,9 @@ async function updateCandidateProgress(ownerId: ObjectId): Promise<void> {
     db.collection<SkillGapDocument>("skill_gaps").countDocuments({ ownerId }),
   ]);
   const averageRubricScore = evaluations.length
-    ? evaluations.reduce((sum, item) => sum + item.overallScore, 0) / evaluations.length
+    ? roundToTwoDecimalPlaces(
+      evaluations.reduce((sum, item) => sum + item.overallScore, 0) / evaluations.length,
+    )
     : null;
   const progress: CandidateProgressDocument = {
     _id: ownerId,

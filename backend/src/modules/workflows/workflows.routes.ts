@@ -22,10 +22,11 @@ import type {
 } from "../ai-results/models.js";
 import type { ResumeDocument } from "../resumes/resume.model.js";
 import type { JobDescriptionDocument } from "../jobs/job-description.model.js";
+import { roundToTwoDecimalPlaces } from "../../common/rounding.js";
 
 const idsSchema = z.object({
-  resumeId: z.string().regex(/^[\da-f]{24}$/i),
-  jobDescriptionId: z.string().regex(/^[\da-f]{24}$/i),
+  resumeId: z.string().trim().regex(/^[\da-f]{24}$/i, "resumeId must be a 24-character ObjectId"),
+  jobDescriptionId: z.string().trim().regex(/^[\da-f]{24}$/i, "jobDescriptionId must be a 24-character ObjectId"),
 }).strict();
 
 const optimizeSchema = idsSchema;
@@ -65,7 +66,9 @@ workflowsRouter.get(
       data: {
         completedInterviews: progress?.completedInterviews ?? 0,
         completedEvaluations: progress?.completedEvaluations ?? 0,
-        averageRubricScores: progress ? { overall: progress.averageRubricScore } : {},
+        averageRubricScores: progress?.averageRubricScore == null
+          ? {}
+          : { overall: roundToTwoDecimalPlaces(progress.averageRubricScore) },
         skillGapCount: progress?.skillGapCount ?? 0,
         updatedAt: (progress?.updatedAt ?? new Date(0)).toISOString(),
       },
@@ -145,6 +148,9 @@ workflowsRouter.post(
   validateBody(optimizeSchema),
   asyncHandler(async (req, res) => {
     if (!req.auth) throw new UnauthorizedError();
+    if (!ObjectId.isValid(req.body.resumeId) || !ObjectId.isValid(req.body.jobDescriptionId)) {
+      throw new ValidationError("A valid CV and job description are required");
+    }
     getLlmProvider();
     const [resume, description] = await loadOwnedInputs(req.auth.userId, req.body.resumeId, req.body.jobDescriptionId);
     if (!resume || !description) throw new NotFoundError("Resume or job description not found");

@@ -2,6 +2,7 @@ export interface ApiErrorPayload {
   error?: {
     code?: string;
     message?: string;
+    details?: unknown;
   };
 }
 
@@ -10,6 +11,7 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -351,6 +353,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       payload?.error?.message ?? "The request could not be completed.",
       response.status,
       payload?.error?.code,
+      payload?.error?.details,
     );
   }
   if (!payload?.success) {
@@ -595,9 +598,21 @@ export function answerInterview(
   return request(`/api/v1/interviews/${encodeURIComponent(sessionId)}/answer`, {
     token,
     method: "POST",
-    headers: { "Idempotency-Key": crypto.randomUUID() },
+    headers: { "Idempotency-Key": createIdempotencyKey() },
     body: JSON.stringify({ answerText, questionIndex }),
   });
+}
+
+export function createIdempotencyKey(): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+  if (cryptoApi?.getRandomValues) {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  return `answer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function evaluateInterview(token: string, sessionId: string): Promise<AcceptedJob & { sessionId: string }> {

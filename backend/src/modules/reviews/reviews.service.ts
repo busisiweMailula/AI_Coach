@@ -6,6 +6,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import { getDb } from "../../infra/db/database.js";
 import { recordAuditEvent } from "../users/audit-log.service.js";
 import { startReviewGraph, resumeReviewGraph } from "../../graphs/review-escalation.graph.js";
+import { roundToTwoDecimalPlaces } from "../../common/rounding.js";
 import type {
   InterviewAnswerDocument,
   InterviewEvaluationDocument,
@@ -278,8 +279,11 @@ export async function getCoachReviewDetails(
     review: toReviewResponse(item),
     target: {
       type: "interview_evaluation",
-      overallScore: evaluation.overallScore,
-      dimensions: evaluation.dimensions,
+      overallScore: roundToTwoDecimalPlaces(evaluation.overallScore),
+      dimensions: evaluation.dimensions.map((item) => ({
+        ...item,
+        score: roundToTwoDecimalPlaces(item.score),
+      })),
       strengths: evaluation.strengths,
       improvements: evaluation.improvements,
       exampleAnswer: evaluation.exampleAnswer,
