@@ -21,9 +21,11 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `POST /auth/register` | Public | Candidate-only registration |
 | `POST /auth/login` | Public | Authenticate and issue access token |
 | `GET /users/me` | Candidate, coach, admin | Return safe current-user profile |
-| `POST /resumes/upload` | Candidate | Require resume-processing consent, validate and extract PDF/DOCX text, and store the source privately |
+| `POST /resumes/upload` | Candidate | Require resume-processing consent, extract PDF/DOCX paragraphs and layout, persist lossless `structuredCv` alongside retrieval `extractedText`, and store the source privately |
 | `GET /resumes` | Candidate | List own resumes |
 | `GET /resumes/{resumeId}` | Candidate owner | Get metadata, extraction status, and extracted source text |
+| `GET /resumes/{resumeId}/structured` | Candidate owner | Read or lazily reconstruct the owned resume's structured CV |
+| `PUT /resumes/{resumeId}/structured` | Candidate owner | Save user-reviewed section and field corrections |
 | `PATCH /resumes/{resumeId}` | Candidate owner | Update candidate-editable title/notes |
 | `POST /jobs/analyze` | Candidate | Persist pasted text or validated PDF/DOCX/TXT and queue analysis status |
 | `GET /jobs` | Candidate | List own job descriptions |
@@ -34,7 +36,7 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `POST /skills/gaps` | Candidate | Start learning-oriented gap analysis |
 | `GET /skills/gaps/{gapId}` | Candidate owner | Retrieve gap categories and learning actions |
 | `POST /resumes/optimize` | Candidate | Generate factual suggestions for candidate review |
-| `GET /resumes/{resumeId}/draft?jobDescriptionId={jobDescriptionId}` | Candidate owner | Generate a text CV draft using only accepted suggestions for that CV and job |
+| `GET /resumes/{resumeId}/draft?jobDescriptionId={jobDescriptionId}` | Candidate owner | Return a structured CV draft with only accepted, uniquely targeted suggestions applied in place; report untargetable accepted suggestions as `needsPlacement` |
 | `GET /suggestions` | Candidate | List own resume suggestions and decisions |
 | `POST /suggestions/{suggestionId}/decision` | Candidate owner | Accept/reject one suggestion |
 | `POST /interviews/generate` | Candidate | Generate technical, behavioural, or mixed interview questions |

@@ -1,5 +1,6 @@
 import type { ObjectId } from "mongodb";
 import type { AnswerEvaluation, JobAnalysis, ResumeParse, SkillAnalysis } from "../../agents/schemas.js";
+import type { SuggestionTarget } from "../resumes/structured-cv.js";
 
 export interface ParsedResumeDataDocument extends ResumeParse {
   _id: ObjectId;
@@ -47,6 +48,7 @@ export interface ResumeSuggestionDocument {
   proposedText: string;
   reason: string;
   sourceSnippet: string;
+  target?: SuggestionTarget | null;
   status: "pending" | "accepted" | "rejected";
   reviewStatus: "not_required" | "pending_review" | "approved" | "edited" | "rejected";
   flags: string[];

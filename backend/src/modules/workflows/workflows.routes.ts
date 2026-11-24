@@ -8,8 +8,10 @@ import { enqueueAgentJob } from "../../infra/jobs/job-queue.js";
 import { getDb } from "../../infra/db/database.js";
 import { authMiddleware, requireRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
-import { prepareResumeTextForAI } from "../privacy/resume-anonymizer.js";
-import { buildResumeDraft } from "../resumes/resume-draft.js";
+import {
+  applyAcceptedSuggestions,
+} from "../resumes/structured-cv.js";
+import { getStructuredCv } from "../resumes/resumes.service.js";
 import type {
   CandidateProgressDocument,
   JobMatchDocument,
@@ -183,18 +185,26 @@ workflowsRouter.get(
       .find({ ownerId, resumeId: resume._id, jobDescriptionId, status: "accepted" })
       .sort({ createdAt: 1, _id: 1 })
       .toArray();
-    const anonymizedText = suggestions.length > 0
-      ? await prepareResumeTextForAI(ownerId.toHexString(), resume.extractedText)
-      : resume.extractedText;
-    const content = buildResumeDraft(resume.extractedText, anonymizedText, suggestions);
+    const draft = applyAcceptedSuggestions(
+      await getStructuredCv(resume),
+      suggestions.map((suggestion) => ({
+        id: suggestion._id.toHexString(),
+        originalText: suggestion.originalText,
+        proposedText: suggestion.proposedText,
+        sourceSnippet: suggestion.sourceSnippet,
+        status: suggestion.status,
+        target: suggestion.target,
+      })),
+    );
 
     res.status(200).json({
       success: true,
       data: {
         resumeId: resume._id.toHexString(),
         jobDescriptionId: description._id.toHexString(),
-        content,
-        appliedSuggestionIds: suggestions.map((suggestion) => suggestion._id.toHexString()),
+        structuredCv: draft.structuredCv,
+        appliedSuggestionIds: draft.appliedSuggestionIds,
+        needsPlacement: draft.needsPlacement,
       },
     });
   }),
@@ -396,6 +406,7 @@ function suggestionResponse(item: ResumeSuggestionDocument) {
     proposedText: item.proposedText,
     reason: item.reason,
     sourceSnippet: item.sourceSnippet,
+    target: item.target ?? null,
     status: item.status,
     reviewStatus: item.reviewStatus,
     flags: item.flags,

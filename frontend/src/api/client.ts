@@ -148,9 +148,56 @@ export interface Resume {
   title?: string;
   notes?: string;
   extractedText?: string;
+  structuredCv?: StructuredCv;
   parsedData?: unknown;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface StructuredCvLine {
+  id: string;
+  text: string;
+  kind: "paragraph" | "bullet";
+  bold?: boolean;
+  fontSize?: number;
+  alignRight?: boolean;
+  styleName?: string;
+}
+
+export interface StructuredCvEntry {
+  id: string;
+  title: string;
+  dates: string;
+  company: string;
+  location: string;
+  fields: Partial<Record<"Objective" | "Technologies" | "Contribution" | "Outcome", string>>;
+  bullets: StructuredCvLine[];
+  lineIds: string[];
+}
+
+export interface StructuredCvSection {
+  id: string;
+  type: "summary" | "coreCompetencies" | "technicalSkills" | "experience" | "projects" |
+    "education" | "certifications" | "additionalInformation" | "references" | "custom";
+  heading: string;
+  sourceHeadings: string[];
+  lines: StructuredCvLine[];
+  entries: StructuredCvEntry[];
+}
+
+export interface StructuredCv {
+  version: 1;
+  header: {
+    name: string;
+    headline: string;
+    phone: string;
+    email: string;
+    location: string;
+    links: string[];
+  };
+  sections: StructuredCvSection[];
+  coverage: number;
+  needsReview: boolean;
 }
 
 export interface JobDescription {
@@ -213,6 +260,16 @@ export interface ResumeSuggestion {
   proposedText: string;
   reason: string;
   sourceSnippet: string;
+  target?: {
+    sectionType: StructuredCvSection["type"];
+    sectionSubtype?: string;
+    entryId?: string;
+    bulletId?: string;
+    field?: string;
+    operation: "replace";
+    before: string;
+    after: string;
+  } | null;
   status: "pending" | "accepted" | "rejected";
   reviewStatus: string;
   flags: string[];
@@ -358,9 +415,34 @@ export function getResumeDraft(
   token: string,
   resumeId: string,
   jobDescriptionId: string,
-): Promise<{ resumeId: string; jobDescriptionId: string; content: string; appliedSuggestionIds: string[] }> {
+): Promise<{
+  resumeId: string;
+  jobDescriptionId: string;
+  structuredCv: StructuredCv;
+  appliedSuggestionIds: string[];
+  needsPlacement: Array<{ suggestionId: string; reason: string }>;
+}> {
   const query = new URLSearchParams({ jobDescriptionId });
   return request(`/api/v1/resumes/${encodeURIComponent(resumeId)}/draft?${query}`, { token });
+}
+
+export function getResumeStructure(
+  token: string,
+  resumeId: string,
+): Promise<{ resumeId: string; structuredCv: StructuredCv }> {
+  return request(`/api/v1/resumes/${encodeURIComponent(resumeId)}/structured`, { token });
+}
+
+export function saveResumeStructure(
+  token: string,
+  resumeId: string,
+  structuredCv: StructuredCv,
+): Promise<{ structuredCv: StructuredCv }> {
+  return request(`/api/v1/resumes/${encodeURIComponent(resumeId)}/structured`, {
+    token,
+    method: "PUT",
+    body: JSON.stringify({ structuredCv }),
+  });
 }
 
 export function updateResume(

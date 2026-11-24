@@ -311,8 +311,21 @@ describe("Phase 4 intake APIs", () => {
       });
     expect(uploaded.status).toBe(201);
     expect(uploaded.body.data.resume.extractedText).toContain("Built secure APIs");
+    expect(uploaded.body.data.resume.structuredCv.coverage).toBe(1);
 
     const resumeId = uploaded.body.data.resume.id as string;
+    const structure = await request(app)
+      .get(`/api/v1/resumes/${resumeId}/structured`)
+      .set("Authorization", `Bearer ${candidateToken}`);
+    expect(structure.status).toBe(200);
+    expect(structure.body.data.structuredCv.sections.flatMap((section: { lines: Array<{ text: string }> }) =>
+      section.lines.map((line) => line.text)).join(" ")).toContain("Built secure APIs");
+    const forbiddenStructureUpdate = await request(app)
+      .put(`/api/v1/resumes/${resumeId}/structured`)
+      .set("Authorization", `Bearer ${otherCandidateToken}`)
+      .send({ structuredCv: structure.body.data.structuredCv });
+    expect(forbiddenStructureUpdate.status).toBe(404);
+
     const pdfUpload = await request(app)
       .post("/api/v1/resumes/upload")
       .set("Authorization", `Bearer ${candidateToken}`)

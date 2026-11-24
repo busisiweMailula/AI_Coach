@@ -354,7 +354,10 @@ describe("Phase 5 AI workflows", () => {
       .get(`/api/v1/resumes/${resumeId.toHexString()}/draft?jobDescriptionId=${jobDescriptionId.toHexString()}`)
       .set("Authorization", `Bearer ${ownerToken}`);
     expect(response.status).toBe(200);
-    expect(response.body.data.content).toBe("Designed and delivered secure APIs. Led project planning.");
+    expect(response.body.data.structuredCv.sections.flatMap((section: { lines: Array<{ text: string }> }) =>
+      section.lines.map((line) => line.text)).join(" ")).toBe(
+      "Designed and delivered secure APIs. Led project planning.",
+    );
     expect(response.body.data.appliedSuggestionIds).toEqual([acceptedId.toHexString()]);
 
     const hidden = await request(app)
@@ -394,7 +397,8 @@ describe("Phase 5 AI workflows", () => {
         .set("Authorization", `Bearer ${ownerToken}`);
 
       expect(response.status).toBe(200);
-      expect(response.body.data.content)
+      expect(response.body.data.structuredCv.sections.flatMap((section: { lines: Array<{ text: string }> }) =>
+        section.lines.map((line) => line.text)).join("\n"))
         .toBe("Highlights:\nBuilt a scalable system supporting business operations.\nResult: reduced latency");
       expect(response.body.data.appliedSuggestionIds).toEqual([suggestionId.toHexString()]);
     } finally {

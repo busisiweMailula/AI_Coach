@@ -22,11 +22,13 @@ import {
   getQuestionSet,
   getResume,
   getResumeDraft,
+  getResumeStructure,
   getResumes,
   getResumeSuggestions,
   getSkillGaps,
   optimizeResume,
   requestResumeDraftReview,
+  saveResumeStructure,
   startInterview,
   submitJobDescription,
   updateResume,
@@ -40,6 +42,7 @@ import {
   type JobDescription,
   type MatchResult,
   type Resume,
+  type StructuredCv,
   type ResumeSuggestion,
   type ReviewItem,
   type SkillGapResult,
@@ -681,7 +684,10 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
   const [jobId, setJobId] = useState(jobs[0]?.id ?? "");
   const [suggestions, setSuggestions] = useState<ResumeSuggestion[]>([]);
   const [generationComplete, setGenerationComplete] = useState(false);
-  const [draft, setDraft] = useState<string | null>(null);
+  const [sourceStructure, setSourceStructure] = useState<StructuredCv | null>(null);
+  const [draft, setDraft] = useState<StructuredCv | null>(null);
+  const [needsPlacement, setNeedsPlacement] = useState<Array<{ suggestionId: string; reason: string }>>([]);
+  const [structureConfirmed, setStructureConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [sendingForCoachReview, setSendingForCoachReview] = useState(false);
@@ -691,6 +697,20 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
   const [selectedReviewDraft, setSelectedReviewDraft] = useState<{ id: string; content: string } | null>(null);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
+
+  useEffect(() => {
+    let active = true;
+    setSourceStructure(null);
+    setDraft(null);
+    setStructureConfirmed(false);
+    if (!selectedResumeId) return () => { active = false; };
+    void getResumeStructure(token, selectedResumeId).then((result) => {
+      if (active) setSourceStructure(result.structuredCv);
+    }).catch((error: unknown) => {
+      if (active) setNotice({ text: errorMessage(error), error: true });
+    });
+    return () => { active = false; };
+  }, [token, selectedResumeId]);
 
   useEffect(() => {
     let active = true;
@@ -770,19 +790,29 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
   }
 
   async function generateDraft() {
-    if (!selectedResumeId || !jobId) {
+    if (!selectedResumeId || !jobId || !sourceStructure) {
       setNotice({ text: "Select a CV in Resume & role and choose a job description.", error: true });
+      return;
+    }
+    if (sourceStructure.needsReview && !structureConfirmed) {
+      setNotice({ text: "Review and confirm the detected CV sections before applying suggestions.", error: true });
       return;
     }
     setBusy(true);
     setNotice(null);
     try {
+      const reviewedStructure = structureConfirmed
+        ? { ...sourceStructure, needsReview: false }
+        : sourceStructure;
+      const saved = await saveResumeStructure(token, selectedResumeId, reviewedStructure);
+      setSourceStructure(saved.structuredCv);
       const result = await getResumeDraft(token, selectedResumeId, jobId);
-      setDraft(result.content);
-      setNotice({
-        text: `${result.appliedSuggestionIds.length} accepted suggestion${result.appliedSuggestionIds.length === 1 ? "" : "s"} applied to the CV draft.`,
-        error: false,
-      });
+      setDraft(result.structuredCv);
+      setNeedsPlacement(result.needsPlacement);
+      const appliedNotice = `${result.appliedSuggestionIds.length} accepted suggestion${result.appliedSuggestionIds.length === 1 ? "" : "s"} applied to the CV draft.`;
+      setNotice(result.needsPlacement.length
+        ? { text: `${appliedNotice} ${result.needsPlacement.length} accepted suggestion${result.needsPlacement.length === 1 ? "" : "s"} need placement and were not applied.`, error: false }
+        : { text: appliedNotice, error: false });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
     } finally {
@@ -801,11 +831,11 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
       const review = await requestResumeDraftReview(token, {
         resumeId: selectedResumeId,
         jobDescriptionId: jobId,
-        draftContent: draft,
+        draftContent: serializeStructuredCv(draft),
         reason: coachReviewReason.trim() || "Please review this CV draft and provide recommendations.",
       });
       setCoachReviews((current) => [review, ...current.filter((item) => item.id !== review.id)]);
-      setSelectedReviewDraft({ id: review.id, content: draft });
+      setSelectedReviewDraft({ id: review.id, content: serializeStructuredCv(draft) });
       setCoachReviewReason("");
       setNotice({ text: "Your CV draft was sent to the coach review queue.", error: false });
     } catch (error) {
@@ -901,6 +931,7 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
               </div>
               <p><strong>Reason:</strong> {suggestion.reason}</p>
               <p className="supporting-copy">Status: {suggestion.status} · Review: {suggestion.reviewStatus}</p>
+              {!suggestion.target && <p className="notice">Needs placement: no unique section or entry target was detected.</p>}
               {suggestion.status === "pending" && (
                 <div className="actions">
                   <button className="primary" type="button" disabled={busy} onClick={() => void decide(suggestion.id, "accept")}>Accept</button>
@@ -914,11 +945,22 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
       <section className="result-section">
         <h3>CV draft</h3>
         <p className="supporting-copy">
-          Accepted suggestions replace their matching text in the CV. Download the editable Word document to complete or update fields, then export it to PDF from Word.
-          If an accepted suggestion cannot be safely matched to the current CV, the draft request will explain the issue instead of adding it as a bullet.
+          Review and correct detected sections before applying accepted suggestions. Accepted changes replace their targeted content in place; rejected and pending suggestions do nothing.
         </p>
+        {sourceStructure?.needsReview && (
+          <>
+            <p className="notice">Some source text could not be confidently classified. Review the sections below and confirm them before generating the draft.</p>
+            <label className="structure-confirm">
+              <input type="checkbox" checked={structureConfirmed}
+                onChange={(event) => setStructureConfirmed(event.target.checked)} />
+              I reviewed the detected sections and confirm this structure.
+            </label>
+          </>
+        )}
         <div className="actions">
-          <button className="secondary" type="button" disabled={busy || !selectedResumeId || !jobId} onClick={() => void generateDraft()}>
+          <button className="secondary" type="button"
+            disabled={busy || !selectedResumeId || !jobId || !sourceStructure || (sourceStructure.needsReview && !structureConfirmed)}
+            onClick={() => void generateDraft()}>
             {busy ? "Preparing…" : "Generate CV draft"}
           </button>
           {draft !== null && (
@@ -927,7 +969,21 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
             </button>
           )}
         </div>
-        {draft !== null && <ResumePreview content={draft} />}
+        {needsPlacement.map((item) => (
+          <p className="notice" key={item.suggestionId}>
+            Needs placement: {item.reason}
+          </p>
+        ))}
+        {(draft ?? sourceStructure) && (
+          <ResumePreview
+            structuredCv={draft ?? sourceStructure ?? undefined}
+            changedSectionIds={changedSectionIds(sourceStructure, draft)}
+            onChange={(updated) => {
+              if (draft) setDraft(updated);
+              else setSourceStructure(updated);
+            }}
+          />
+        )}
       </section>
       <section className="result-section">
         <h3>Coach perspective</h3>
@@ -993,6 +1049,34 @@ function coachReviewStatusLabel(status: ReviewItem["status"]) {
   if (status === "edited") return "Coach feedback received";
   if (status === "rejected") return "Coach declined the review";
   return "Coach review completed";
+}
+
+function changedSectionIds(original: StructuredCv | null, draft: StructuredCv | null): string[] {
+  if (!original || !draft) return [];
+  return draft.sections.filter((section) => {
+    const before = original.sections.find((item) => item.id === section.id);
+    if (!before) return true;
+    return before.lines.map((line) => `${line.kind}:${line.text}`).join("\n") !==
+      section.lines.map((line) => `${line.kind}:${line.text}`).join("\n");
+  }).map((section) => section.id);
+}
+
+function serializeStructuredCv(cv: StructuredCv): string {
+  const header = [
+    cv.header.name,
+    cv.header.headline,
+    cv.header.phone,
+    cv.header.email,
+    cv.header.location,
+    ...cv.header.links,
+  ].filter(Boolean);
+  return [
+    ...header,
+    ...cv.sections.flatMap((section) => [
+      ...(section.heading ? [section.heading] : []),
+      ...section.lines.map((line) => line.kind === "bullet" ? `• ${line.text}` : line.text),
+    ]),
+  ].join("\n");
 }
 
 function InterviewSection({ token, resumes, selectedResumeId, jobs }: {

@@ -701,6 +701,77 @@ button:disabled {
   font-weight: 750;
 }
 
+.resume-preview-header {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.resume-preview-header input,
+.resume-preview-header textarea,
+.resume-preview-heading,
+.resume-preview-line textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
+.resume-preview-header input:focus,
+.resume-preview-header textarea:focus,
+.resume-preview-heading:focus,
+.resume-preview-line textarea:focus {
+  border-color: #9aafc8;
+  outline: 2px solid rgb(36 87 197 / 15%);
+}
+
+.resume-preview-header .resume-preview-title {
+  color: #173b69;
+  font-size: 1.25rem;
+  font-weight: 750;
+}
+
+.resume-preview-contact {
+  color: #53647b;
+  font-size: 0.9rem;
+}
+
+.resume-preview-section.changed {
+  border-left: 3px solid #e8a82e;
+  padding-left: 10px;
+}
+
+.resume-preview-line {
+  display: block;
+}
+
+.resume-preview-line textarea {
+  display: block;
+  resize: vertical;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.resume-preview-line.resume-preview-bullet textarea {
+  padding-left: 22px;
+}
+
+.structure-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.structure-confirm input {
+  width: auto;
+  margin-top: 3px;
+}
+
 .resume-preview p {
   margin: 5px 0;
   white-space: pre-wrap;

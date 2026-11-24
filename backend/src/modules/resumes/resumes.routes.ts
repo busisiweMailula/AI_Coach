@@ -7,7 +7,16 @@ import { env } from "../../config/env.js";
 import { authMiddleware, requireRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
 import { ensureResumeConsent } from "../privacy/privacy.service.js";
-import { getParsedResumeData, getResume, getResumes, patchResume, uploadResume } from "./resumes.service.js";
+import {
+  getParsedResumeData,
+  getResume,
+  getResumes,
+  getStructuredCv,
+  patchResume,
+  saveStructuredCv,
+  uploadResume,
+} from "./resumes.service.js";
+import { structuredCvSchema } from "./structured-cv.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -68,6 +77,26 @@ resumesRouter.get(
   }),
 );
 
+resumesRouter.get(
+  "/:resumeId/structured",
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw new UnauthorizedError();
+    const resume = await getResume(req.params.resumeId, req.auth.userId);
+    const structuredCv = await getStructuredCv(resume);
+    res.status(200).json({ success: true, data: { resumeId: resume._id.toHexString(), structuredCv } });
+  }),
+);
+
+resumesRouter.put(
+  "/:resumeId/structured",
+  validateBody(z.object({ structuredCv: structuredCvSchema }).strict()),
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw new UnauthorizedError();
+    const structuredCv = await saveStructuredCv(req.params.resumeId, req.auth.userId, req.body.structuredCv);
+    res.status(200).json({ success: true, data: { structuredCv } });
+  }),
+);
+
 resumesRouter.patch(
   "/:resumeId",
   validateBody(updateSchema),
@@ -94,6 +123,7 @@ export function toResumeResponse(
     ...(resume.title === undefined ? {} : { title: resume.title }),
     ...(resume.notes === undefined ? {} : { notes: resume.notes }),
     ...(includeText ? { extractedText: resume.extractedText } : {}),
+    ...(resume.structuredCv ? { structuredCv: resume.structuredCv } : {}),
     ...(parsedData ? { parsedData } : {}),
     createdAt: resume.createdAt.toISOString(),
     updatedAt: resume.updatedAt.toISOString(),

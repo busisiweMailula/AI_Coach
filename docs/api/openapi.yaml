@@ -583,8 +583,8 @@ paths:
       - $ref: "#/components/parameters/ResumeId"
     get:
       tags: [Resumes]
-      summary: Generate a text CV draft using accepted suggestions only
-      description: Requires current resume-processing consent when accepted suggestions need to be applied.
+      summary: Generate a structured CV draft using accepted suggestions only
+      description: Applies accepted, uniquely targeted replacements in place. Rejected and pending suggestions have no effect; untargetable accepted suggestions are returned in needsPlacement and are never appended.
       parameters:
         - name: jobDescriptionId
           in: query
@@ -593,7 +593,7 @@ paths:
             $ref: "#/components/schemas/ObjectId"
       responses:
         "200":
-          description: Draft based on the owned resume and its accepted suggestions
+          description: Structured draft based on the owned resume and its accepted suggestions
           content:
             application/json:
               schema:
@@ -604,22 +604,101 @@ paths:
                     const: true
                   data:
                     type: object
-                    required: [resumeId, jobDescriptionId, content, appliedSuggestionIds]
+                    required: [resumeId, jobDescriptionId, structuredCv, appliedSuggestionIds, needsPlacement]
                     properties:
                       resumeId:
                         $ref: "#/components/schemas/ObjectId"
                       jobDescriptionId:
                         $ref: "#/components/schemas/ObjectId"
-                      content:
-                        type: string
+                      structuredCv:
+                        $ref: "#/components/schemas/StructuredCv"
                       appliedSuggestionIds:
                         type: array
                         items:
                           $ref: "#/components/schemas/ObjectId"
+                      needsPlacement:
+                        type: array
+                        items:
+                          type: object
+                          required: [suggestionId, reason]
+                          properties:
+                            suggestionId:
+                              $ref: "#/components/schemas/ObjectId"
+                            reason:
+                              type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /resumes/{resumeId}/structured:
+    parameters:
+      - $ref: "#/components/parameters/ResumeId"
+    get:
+      tags: [Resumes]
+      summary: Get the owned resume's structured CV
+      responses:
+        "200":
+          description: Structured resume sections and stable identifiers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [resumeId, structuredCv]
+                    properties:
+                      resumeId:
+                        $ref: "#/components/schemas/ObjectId"
+                      structuredCv:
+                        $ref: "#/components/schemas/StructuredCv"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    put:
+      tags: [Resumes]
+      summary: Save user-reviewed CV structure
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [structuredCv]
+              properties:
+                structuredCv:
+                  $ref: "#/components/schemas/StructuredCv"
+      responses:
+        "200":
+          description: Saved user-reviewed structure
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [structuredCv]
+                    properties:
+                      structuredCv:
+                        $ref: "#/components/schemas/StructuredCv"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -1817,12 +1896,143 @@ components:
           type: string
         notes:
           type: string
+        structuredCv:
+          $ref: "#/components/schemas/StructuredCv"
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+    StructuredCv:
+      type: object
+      additionalProperties: false
+      required: [version, header, sections, coverage, needsReview]
+      properties:
+        version:
+          const: 1
+        header:
+          type: object
+          additionalProperties: false
+          required: [name, headline, phone, email, location, links]
+          properties:
+            name:
+              type: string
+            headline:
+              type: string
+            phone:
+              type: string
+            email:
+              type: string
+            location:
+              type: string
+            links:
+              type: array
+              items:
+                type: string
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/StructuredCvSection"
+        coverage:
+          type: number
+          minimum: 0
+          maximum: 1
+        needsReview:
+          type: boolean
+    StructuredCvSection:
+      type: object
+      additionalProperties: false
+      required: [id, type, heading, sourceHeadings, lines, entries]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [summary, coreCompetencies, technicalSkills, experience, projects, education, certifications, additionalInformation, references, custom]
+        heading:
+          type: string
+        sourceHeadings:
+          type: array
+          items:
+            type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/StructuredCvLine"
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/StructuredCvEntry"
+    StructuredCvEntry:
+      type: object
+      additionalProperties: false
+      required: [id, title, dates, company, location, fields, bullets, lineIds]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        dates:
+          type: string
+        company:
+          type: string
+        location:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+        bullets:
+          type: array
+          items:
+            $ref: "#/components/schemas/StructuredCvLine"
+        lineIds:
+          type: array
+          items:
+            type: string
+    StructuredCvLine:
+      type: object
+      additionalProperties: false
+      required: [id, text, kind]
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        kind:
+          type: string
+          enum: [paragraph, bullet]
+        bold:
+          type: boolean
+        fontSize:
+          type: number
+        alignRight:
+          type: boolean
+        styleName:
+          type: string
+    SuggestionTarget:
+      type: object
+      additionalProperties: false
+      required: [sectionType, operation, before, after]
+      properties:
+        sectionType:
+          type: string
+          enum: [summary, coreCompetencies, technicalSkills, experience, projects, education, certifications, additionalInformation, references, custom]
+        sectionSubtype:
+          type: string
+        entryId:
+          type: string
+        bulletId:
+          type: string
+        field:
+          type: string
+        operation:
+          const: replace
+        before:
+          type: string
+        after:
+          type: string
     ResumeCorrection:
       type: object
       additionalProperties: false
@@ -1956,6 +2166,12 @@ components:
           type: string
         reason:
           type: string
+        sourceSnippet:
+          type: string
+        target:
+          oneOf:
+            - $ref: "#/components/schemas/SuggestionTarget"
+            - type: "null"
         evidence:
           type: array
           items:

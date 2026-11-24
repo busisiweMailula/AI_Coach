@@ -36,6 +36,11 @@ import type {
 import { createReviewItem, shouldEscalate } from "../../modules/reviews/reviews.service.js";
 import { ensureExternalModelConsent } from "../../modules/privacy/privacy.service.js";
 import { findRelevantResumeEvidence } from "../embeddings/resume-semantic-search.js";
+import {
+  deriveSuggestionTarget,
+  structureCv,
+  suggestionTargetSchema,
+} from "../../modules/resumes/structured-cv.js";
 
 const jobs = () => getDb().collection<AsyncJobDocument>("jobs");
 const resumes = () => getDb().collection<ResumeDocument>("resumes");
@@ -319,6 +324,7 @@ async function createSuggestions(job: AsyncJobDocument): Promise<{ type: string;
       : Promise.resolve(null),
   ]);
   if (!resume || (jobDescriptionId && !description)) throw new NotFoundError("Resume or job description not found");
+  const structuredCv = resume.structuredCv ?? structureCv(resume.extractedText);
   const anonymizedResumeText = await prepareResumeTextForAI(
     job.ownerId.toHexString(),
     resume.extractedText,
@@ -338,12 +344,17 @@ async function createSuggestions(job: AsyncJobDocument): Promise<{ type: string;
     const factual = checkFabrication(item.proposedText, anonymizedResumeText);
     if (!supported || !factual.safe || findLanguageGuardrailHits(item.proposedText).length > 0) continue;
     const suggestionId = new ObjectId();
+    const candidateTarget = deriveSuggestionTarget(structuredCv, item);
+    const target = candidateTarget
+      ? suggestionTargetSchema.parse(candidateTarget)
+      : null;
     const suggestion: ResumeSuggestionDocument = {
       _id: suggestionId,
       ownerId: job.ownerId,
       resumeId,
       jobDescriptionId,
       ...item,
+      target,
       status: "pending",
       reviewStatus: "not_required",
       flags: [],
