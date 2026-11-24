@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import ResumePreview from "./ResumePreview";
 import {
   ApiError,
   analyzeMatch,
@@ -7,6 +8,7 @@ import {
   answerInterview,
   decideSuggestion,
   evaluateInterview,
+  getCandidateResumeDraftReview,
   generateQuestions,
   getCandidateProgress,
   getConsentStatus,
@@ -16,6 +18,7 @@ import {
   getJobs,
   getJobStatus,
   getMatch,
+  getMyReviews,
   getQuestionSet,
   getResume,
   getResumeDraft,
@@ -23,6 +26,7 @@ import {
   getResumeSuggestions,
   getSkillGaps,
   optimizeResume,
+  requestResumeDraftReview,
   startInterview,
   submitJobDescription,
   updateResume,
@@ -37,6 +41,7 @@ import {
   type MatchResult,
   type Resume,
   type ResumeSuggestion,
+  type ReviewItem,
   type SkillGapResult,
 } from "../../api/client";
 import { useInterviewSpeech } from "./interview-speech";
@@ -679,8 +684,38 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [sendingForCoachReview, setSendingForCoachReview] = useState(false);
+  const [coachReviewsLoading, setCoachReviewsLoading] = useState(true);
+  const [coachReviews, setCoachReviews] = useState<ReviewItem[]>([]);
+  const [coachReviewReason, setCoachReviewReason] = useState("");
+  const [selectedReviewDraft, setSelectedReviewDraft] = useState<{ id: string; content: string } | null>(null);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
+
+  useEffect(() => {
+    let active = true;
+    setCoachReviewsLoading(true);
+    void getMyReviews(token).then((result) => {
+      if (active) setCoachReviews(result.items);
+    }).catch((error: unknown) => {
+      if (active) setNotice({ text: errorMessage(error), error: true });
+    }).finally(() => {
+      if (active) setCoachReviewsLoading(false);
+    });
+    return () => { active = false; };
+  }, [token]);
+
+  async function refreshCoachReviews() {
+    setCoachReviewsLoading(true);
+    try {
+      const result = await getMyReviews(token);
+      setCoachReviews(result.items);
+    } catch (error) {
+      setNotice({ text: errorMessage(error), error: true });
+    } finally {
+      setCoachReviewsLoading(false);
+    }
+  }
 
   async function generate() {
     setSuggestions([]);
@@ -755,6 +790,47 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
     }
   }
 
+  async function sendDraftForCoachReview() {
+    if (!draft || !selectedResumeId || !jobId) {
+      setNotice({ text: "Generate a CV draft before sending it for coach feedback.", error: true });
+      return;
+    }
+    setSendingForCoachReview(true);
+    setNotice(null);
+    try {
+      const review = await requestResumeDraftReview(token, {
+        resumeId: selectedResumeId,
+        jobDescriptionId: jobId,
+        draftContent: draft,
+        reason: coachReviewReason.trim() || "Please review this CV draft and provide recommendations.",
+      });
+      setCoachReviews((current) => [review, ...current.filter((item) => item.id !== review.id)]);
+      setSelectedReviewDraft({ id: review.id, content: draft });
+      setCoachReviewReason("");
+      setNotice({ text: "Your CV draft was sent to the coach review queue.", error: false });
+    } catch (error) {
+      setNotice({ text: errorMessage(error), error: true });
+    } finally {
+      setSendingForCoachReview(false);
+    }
+  }
+
+  async function showSubmittedDraft(reviewId: string) {
+    setSelectedReviewDraft(null);
+    setNotice(null);
+    try {
+      const result = await getCandidateResumeDraftReview(token, reviewId);
+      if (result.target.type !== "resume_draft") {
+        throw new Error("The submitted CV draft is unavailable.");
+      }
+      setSelectedReviewDraft({ id: reviewId, content: result.target.content });
+      setCoachReviews((current) => current.map((item) =>
+        item.id === reviewId ? result.review : item));
+    } catch (error) {
+      setNotice({ text: errorMessage(error), error: true });
+    }
+  }
+
   async function downloadDraft() {
     if (draft === null) return;
     const baseName = (selectedResume?.title || selectedResume?.originalFileName || "resume")
@@ -779,6 +855,12 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
 
   const visibleSuggestions = suggestions.filter((suggestion) =>
     suggestion.resumeId === selectedResumeId && suggestion.jobDescriptionId === jobId);
+  const visibleCoachReviews = coachReviews.filter((review) =>
+    review.targetType === "resume_draft" &&
+    review.targetId === selectedResumeId &&
+    review.sourceJobDescriptionId === jobId);
+  const hasPendingCoachReview = visibleCoachReviews.some((review) =>
+    review.status === "pending_review" || review.status === "in_review");
 
   return (
     <div className="workspace-panel">
@@ -832,8 +914,8 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
       <section className="result-section">
         <h3>CV draft</h3>
         <p className="supporting-copy">
-          Only accepted suggestions are included. Download the editable Word document to complete or update fields, then export it to PDF from Word.
-          Accepted changes that cannot be safely matched to an exact CV passage are included in an “Accepted CV updates” section rather than discarded.
+          Accepted suggestions replace their matching text in the CV. Download the editable Word document to complete or update fields, then export it to PDF from Word.
+          If an accepted suggestion cannot be safely matched to the current CV, the draft request will explain the issue instead of adding it as a bullet.
         </p>
         <div className="actions">
           <button className="secondary" type="button" disabled={busy || !selectedResumeId || !jobId} onClick={() => void generateDraft()}>
@@ -845,10 +927,72 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
             </button>
           )}
         </div>
-        {draft !== null && <pre className="source-preview">{draft}</pre>}
+        {draft !== null && <ResumePreview content={draft} />}
+      </section>
+      <section className="result-section">
+        <h3>Coach perspective</h3>
+        <p className="supporting-copy">
+          The coach receives the exact CV draft shown above and can send recommendations for you to consider alongside the model suggestions.
+        </p>
+        {draft !== null && (
+          <>
+            <label htmlFor="coach-review-context">Optional note for the coach</label>
+            <textarea
+              id="coach-review-context"
+              rows={3}
+              maxLength={2000}
+              value={coachReviewReason}
+              onChange={(event) => setCoachReviewReason(event.target.value)}
+              placeholder="Tell the coach what you would like them to focus on."
+            />
+            <div className="actions">
+              <button
+                className="primary"
+                type="button"
+                disabled={sendingForCoachReview || hasPendingCoachReview}
+                onClick={() => void sendDraftForCoachReview()}
+              >
+                {sendingForCoachReview ? "Sending…" : hasPendingCoachReview ? "Coach review pending" : "Send CV draft to coach"}
+              </button>
+            </div>
+          </>
+        )}
+        {coachReviewsLoading ? (
+          <p className="supporting-copy">Loading coach review history…</p>
+        ) : visibleCoachReviews.length === 0 ? (
+          <p className="supporting-copy">No coach review has been requested for this CV draft yet.</p>
+        ) : (
+          <div className="suggestion-list">
+            {visibleCoachReviews.map((review) => (
+              <article className="suggestion-card" key={review.id}>
+                <h4>{coachReviewStatusLabel(review.status)}</h4>
+                <p className="supporting-copy">Submitted {new Date(review.createdAt).toLocaleString()}</p>
+                {review.requestReason && <p><strong>Your note:</strong> {review.requestReason}</p>}
+                {review.decisionReason && <p><strong>Coach summary:</strong> {review.decisionReason}</p>}
+                {review.decisionText && <p><strong>Coach recommendations:</strong> {review.decisionText}</p>}
+                <button className="secondary" type="button" onClick={() => void showSubmittedDraft(review.id)}>
+                  View submitted CV
+                </button>
+                {selectedReviewDraft?.id === review.id && (
+                  <ResumePreview content={selectedReviewDraft.content} />
+                )}
+              </article>
+            ))}
+            <button className="secondary" type="button" disabled={coachReviewsLoading} onClick={() => void refreshCoachReviews()}>
+              Refresh coach reviews
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );
+}
+
+function coachReviewStatusLabel(status: ReviewItem["status"]) {
+  if (status === "pending_review" || status === "in_review") return "Waiting for coach feedback";
+  if (status === "edited") return "Coach feedback received";
+  if (status === "rejected") return "Coach declined the review";
+  return "Coach review completed";
 }
 
 function InterviewSection({ token, resumes, selectedResumeId, jobs }: {

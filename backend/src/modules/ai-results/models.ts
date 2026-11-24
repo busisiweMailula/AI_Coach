@@ -114,8 +114,10 @@ export interface InterviewEvaluationDocument extends AnswerEvaluation {
 export interface ReviewItemDocument {
   _id: ObjectId;
   ownerId: ObjectId;
-  targetType: "job_match" | "resume_suggestion" | "interview_evaluation";
+  targetType: "job_match" | "resume_suggestion" | "interview_evaluation" | "resume_draft";
   targetId: ObjectId;
+  sourceJobDescriptionId?: ObjectId;
+  targetContent?: string;
   flags: string[];
   riskLevel: "low" | "medium" | "high";
   status: "pending_review" | "in_review" | "approved" | "edited" | "rejected";

@@ -1112,6 +1112,37 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
+  /reviews/mine:
+    get:
+      tags: [Reviews]
+      summary: List the authenticated candidate's reviews and coach feedback
+      x-roles: [candidate]
+      responses:
+        "200":
+          description: Candidate-owned reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ReviewItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
   /reviews/request:
     post:
       tags: [Reviews]
@@ -1138,6 +1169,42 @@ paths:
       responses:
         "201":
           description: Review request queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /reviews/resume-draft:
+    post:
+      tags: [Reviews]
+      summary: Send an owned generated CV draft to the coach review queue
+      description: Shares the submitted CV snapshot only after the candidate explicitly requests a coach review.
+      x-roles: [candidate]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResumeDraftReviewRequest"
+      responses:
+        "201":
+          description: CV draft review queued
           content:
             application/json:
               schema:
@@ -1203,10 +1270,10 @@ paths:
           $ref: "#/components/schemas/ObjectId"
     get:
       tags: [Reviews]
-      summary: Get a review item within the caller's permitted scope
+      summary: Get review details within the caller's permitted scope
       responses:
         "200":
-          description: Review detail
+          description: Candidate CV snapshot or owner-scoped coach review content
           content:
             application/json:
               schema:
@@ -1216,7 +1283,23 @@ paths:
                   success:
                     const: true
                   data:
-                    $ref: "#/components/schemas/ReviewItem"
+                    oneOf:
+                      - $ref: "#/components/schemas/ReviewItem"
+                      - type: object
+                        required: [review, target]
+                        properties:
+                          review:
+                            $ref: "#/components/schemas/ReviewItem"
+                          target:
+                            type: object
+                            required: [type]
+                            properties:
+                              type:
+                                type: string
+                                enum: [job_match, resume_suggestion, interview_evaluation, resume_draft]
+                              content:
+                                type: string
+                            additionalProperties: true
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2070,9 +2153,13 @@ components:
           $ref: "#/components/schemas/ObjectId"
         targetType:
           type: string
-          enum: [job_match, resume_suggestion, interview_evaluation]
+          enum: [job_match, resume_suggestion, interview_evaluation, resume_draft]
         targetId:
           $ref: "#/components/schemas/ObjectId"
+        sourceJobDescriptionId:
+          oneOf:
+            - $ref: "#/components/schemas/ObjectId"
+            - type: "null"
         status:
           type: string
           enum: [pending_review, in_review, approved, edited, rejected]
@@ -2089,9 +2176,30 @@ components:
             - type: "null"
         decisionReason:
           type: [string, "null"]
+        decisionText:
+          type: [string, "null"]
+        requestReason:
+          type: [string, "null"]
         createdAt:
           type: string
           format: date-time
+    ResumeDraftReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [resumeId, jobDescriptionId, draftContent, reason]
+      properties:
+        resumeId:
+          $ref: "#/components/schemas/ObjectId"
+        jobDescriptionId:
+          $ref: "#/components/schemas/ObjectId"
+        draftContent:
+          type: string
+          minLength: 1
+          maxLength: 200000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
     ReviewDecision:
       type: object
       additionalProperties: false
@@ -2104,9 +2212,10 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-        editedOutput:
-          type: object
-          additionalProperties: true
+        editedText:
+          type: string
+          minLength: 1
+          maxLength: 5000
     AdminConfig:
       type: object
       required: [scoringVersion, rubricVersion, reviewThresholdsVersion]

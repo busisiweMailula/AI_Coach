@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ResumePreview from "../resume/ResumePreview";
 import {
   ApiError,
   decideReview,
@@ -91,7 +92,7 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
     <section className="card portal-card">
       <p className="eyebrow">Coach workspace</p>
       <h1>Review queue</h1>
-      <p className="intro">Review flagged preparation feedback and record a reasoned decision.</p>
+      <p className="intro">Review flagged preparation feedback and candidate-submitted CV drafts.</p>
       {notice && <p className={`notice${notice.error ? " error" : ""}`} role={notice.error ? "alert" : "status"}>{notice.message}</p>}
 
       <div className="portal-grid">
@@ -133,7 +134,9 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
               <h2>{reviewTypeLabel(details.target.type)}</h2>
               <ReviewTarget target={details.target} />
               {details.review.requestReason && <p><strong>Candidate request:</strong> {details.review.requestReason}</p>}
-              <label htmlFor="review-reason">Decision reason</label>
+              <label htmlFor="review-reason">
+                {details.target.type === "resume_draft" ? "Summary for the candidate" : "Decision reason"}
+              </label>
               <textarea
                 id="review-reason"
                 rows={3}
@@ -142,12 +145,14 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
                 onChange={(event) => setReason(event.target.value)}
                 required
               />
-              {details.target.type === "resume_suggestion" && (
+              {(details.target.type === "resume_suggestion" || details.target.type === "resume_draft") && (
                 <>
-                  <label htmlFor="edited-recommendation">Edited recommendation</label>
+                  <label htmlFor="edited-recommendation">
+                    {details.target.type === "resume_draft" ? "Recommendations for the candidate" : "Edited recommendation"}
+                  </label>
                   <textarea
                     id="edited-recommendation"
-                    rows={5}
+                    rows={details.target.type === "resume_draft" ? 7 : 5}
                     maxLength={5000}
                     value={editedText}
                     onChange={(event) => setEditedText(event.target.value)}
@@ -155,16 +160,22 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
                 </>
               )}
               <div className="actions">
-                <button className="primary" type="button" disabled={submitting} onClick={() => void submitDecision("approve")}>
-                  Approve
-                </button>
+                {details.target.type === "resume_draft" ? (
+                  <button className="primary" type="button" disabled={submitting} onClick={() => void submitDecision("edit")}>
+                    Send recommendations
+                  </button>
+                ) : (
+                  <button className="primary" type="button" disabled={submitting} onClick={() => void submitDecision("approve")}>
+                    Approve
+                  </button>
+                )}
                 {details.target.type === "resume_suggestion" && (
                   <button className="secondary" type="button" disabled={submitting} onClick={() => void submitDecision("edit")}>
                     Save edit
                   </button>
                 )}
                 <button className="secondary" type="button" disabled={submitting} onClick={() => void submitDecision("reject")}>
-                  Reject
+                  {details.target.type === "resume_draft" ? "Decline review" : "Reject"}
                 </button>
               </div>
             </>
@@ -206,6 +217,14 @@ function ReviewTarget({ target }: { target: CoachReviewDetails["target"] }) {
       </div>
     );
   }
+  if (target.type === "resume_draft") {
+    return (
+      <div className="review-content">
+        <h3>Candidate’s CV draft</h3>
+        <ResumePreview content={target.content} />
+      </div>
+    );
+  }
   return (
     <div className="review-content">
       <p><strong>Overall score:</strong> {target.overallScore}%</p>
@@ -234,6 +253,7 @@ function ReviewTarget({ target }: { target: CoachReviewDetails["target"] }) {
 function reviewTypeLabel(type: ReviewItem["targetType"]) {
   if (type === "job_match") return "Job match";
   if (type === "resume_suggestion") return "Resume suggestion";
+  if (type === "resume_draft") return "Candidate CV draft";
   return "Interview evaluation";
 }
 

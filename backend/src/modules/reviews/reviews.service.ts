@@ -52,6 +52,8 @@ export async function createReviewItem(input: {
   ownerId: ObjectId;
   targetType: ReviewItemDocument["targetType"];
   targetId: ObjectId;
+  sourceJobDescriptionId?: ObjectId;
+  targetContent?: string;
   flags: string[];
   riskLevel: ReviewItemDocument["riskLevel"];
   requestReason?: string | null;
@@ -62,6 +64,8 @@ export async function createReviewItem(input: {
     ownerId: input.ownerId,
     targetType: input.targetType,
     targetId: input.targetId,
+    ...(input.sourceJobDescriptionId ? { sourceJobDescriptionId: input.sourceJobDescriptionId } : {}),
+    ...(input.targetContent ? { targetContent: input.targetContent } : {}),
     flags: input.flags,
     riskLevel: input.riskLevel,
     status: "pending_review",
@@ -89,6 +93,9 @@ export async function requestReview(input: {
   targetId: string;
   reason: string;
 }): Promise<ReviewItemDocument> {
+  if (input.targetType === "resume_draft") {
+    throw new ValidationError("Submit CV drafts through the dedicated coach-review flow");
+  }
   if (!ObjectId.isValid(input.targetId)) throw new NotFoundError("Review target not found");
   const ownerId = new ObjectId(input.ownerId);
   const targetId = new ObjectId(input.targetId);
@@ -116,11 +123,59 @@ export async function requestReview(input: {
   });
 }
 
+export async function requestResumeDraftReview(input: {
+  ownerId: string;
+  resumeId: string;
+  jobDescriptionId: string;
+  draftContent: string;
+  reason: string;
+}): Promise<ReviewItemDocument> {
+  if (!ObjectId.isValid(input.resumeId) || !ObjectId.isValid(input.jobDescriptionId)) {
+    throw new NotFoundError("Resume or job description not found");
+  }
+  const ownerId = new ObjectId(input.ownerId);
+  const resumeId = new ObjectId(input.resumeId);
+  const jobDescriptionId = new ObjectId(input.jobDescriptionId);
+  const [resume, jobDescription] = await Promise.all([
+    getDb().collection("resumes").findOne({ _id: resumeId, ownerId }),
+    getDb().collection("job_descriptions").findOne({ _id: jobDescriptionId, ownerId }),
+  ]);
+  if (!resume || !jobDescription) throw new NotFoundError("Resume or job description not found");
+
+  const existing = await getDb().collection<ReviewItemDocument>("review_items").findOne({
+    ownerId,
+    targetType: "resume_draft",
+    targetId: resumeId,
+    status: { $in: ["pending_review", "in_review"] },
+  });
+  if (existing) throw new ConflictError("A coach review is already pending for this CV");
+
+  return createReviewItem({
+    ownerId,
+    targetType: "resume_draft",
+    targetId: resumeId,
+    sourceJobDescriptionId: jobDescriptionId,
+    targetContent: input.draftContent,
+    flags: ["candidate_requested_review"],
+    riskLevel: "medium",
+    requestReason: input.reason,
+  });
+}
+
 export async function listPendingReviews(): Promise<ReviewItemDocument[]> {
   return getDb()
     .collection<ReviewItemDocument>("review_items")
     .find({ status: "pending_review" })
     .sort({ createdAt: 1 })
+    .limit(100)
+    .toArray();
+}
+
+export async function listMyReviews(ownerId: string): Promise<ReviewItemDocument[]> {
+  return getDb()
+    .collection<ReviewItemDocument>("review_items")
+    .find({ ownerId: new ObjectId(ownerId) })
+    .sort({ createdAt: -1 })
     .limit(100)
     .toArray();
 }
@@ -154,6 +209,7 @@ export async function getCoachReviewDetails(
   target:
     | ({ type: "job_match" } & Pick<JobMatchDocument, "score" | "scoreBreakdown" | "skillResults" | "disclaimer">)
     | ({ type: "resume_suggestion" } & Pick<ResumeSuggestionDocument, "originalText" | "proposedText" | "reason" | "sourceSnippet">)
+    | { type: "resume_draft"; content: string }
     | ({ type: "interview_evaluation" }
       & Pick<InterviewEvaluationDocument, "overallScore" | "dimensions" | "strengths" | "improvements" | "exampleAnswer" | "confidence">
       & { answers: Array<{ question: string; answer: string }> });
@@ -191,6 +247,13 @@ export async function getCoachReviewDetails(
         reason: target.reason,
         sourceSnippet: target.sourceSnippet,
       },
+    };
+  }
+  if (item.targetType === "resume_draft") {
+    if (!item.targetContent) throw new NotFoundError("Submitted CV draft not found");
+    return {
+      review: toReviewResponse(item),
+      target: { type: "resume_draft", content: item.targetContent },
     };
   }
 
@@ -240,6 +303,16 @@ export async function decideReview(input: {
     status: { $in: ["pending_review", "in_review"] },
   });
   if (!current) throw new ConflictError("Review item is no longer pending");
+  if (current.targetType === "resume_draft" &&
+      parsed.data.decision !== "edit" &&
+      parsed.data.decision !== "reject") {
+    throw new ValidationError("A CV draft review must include recommendations or be declined");
+  }
+  if (current.targetType === "resume_draft" &&
+      parsed.data.decision === "edit" &&
+      !parsed.data.editedText) {
+    throw new ValidationError("Coach recommendations are required");
+  }
   if (current.assignedCoachId && !current.assignedCoachId.equals(coachId)) {
     throw new ForbiddenError("This review is assigned to another coach");
   }
@@ -286,6 +359,8 @@ async function updateTargetReviewStatus(
   item: ReviewItemDocument,
   editedText: string | undefined,
 ): Promise<void> {
+  if (item.targetType === "resume_draft") return;
+
   const collectionByType = {
     job_match: "job_matches",
     resume_suggestion: "resume_suggestions",
@@ -309,6 +384,7 @@ export function toReviewResponse(item: ReviewItemDocument) {
     id: item._id.toHexString(),
     targetType: item.targetType,
     targetId: item.targetId.toHexString(),
+    sourceJobDescriptionId: item.sourceJobDescriptionId?.toHexString() ?? null,
     flags: item.flags,
     riskLevel: item.riskLevel,
     status: item.status,

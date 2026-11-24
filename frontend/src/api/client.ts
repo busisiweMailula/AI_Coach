@@ -65,8 +65,9 @@ export interface AdminAuditLog {
 
 export interface ReviewItem {
   id: string;
-  targetType: "job_match" | "resume_suggestion" | "interview_evaluation";
+  targetType: "job_match" | "resume_suggestion" | "interview_evaluation" | "resume_draft";
   targetId: string;
+  sourceJobDescriptionId: string | null;
   flags: string[];
   riskLevel: "low" | "medium" | "high";
   status: "pending_review" | "in_review" | "approved" | "edited" | "rejected";
@@ -94,6 +95,10 @@ export type CoachReviewTarget =
       sourceSnippet: string;
     }
   | {
+      type: "resume_draft";
+      content: string;
+    }
+  | {
       type: "interview_evaluation";
       overallScore: number;
       dimensions: Array<{ dimension: string; score: number; feedback: string }>;
@@ -107,6 +112,11 @@ export type CoachReviewTarget =
 export interface CoachReviewDetails {
   review: ReviewItem;
   target: CoachReviewTarget;
+}
+
+export interface CandidateResumeDraftReview {
+  review: ReviewItem;
+  target: { type: "resume_draft"; content: string };
 }
 
 export interface ConsentStatus {
@@ -524,6 +534,28 @@ export function getInterviewResults(
 
 export function getPendingReviews(token: string): Promise<{ items: ReviewItem[]; nextCursor: string | null }> {
   return request("/api/v1/reviews/pending", { token });
+}
+
+export function getMyReviews(token: string): Promise<{ items: ReviewItem[] }> {
+  return request("/api/v1/reviews/mine", { token });
+}
+
+export function requestResumeDraftReview(
+  token: string,
+  input: { resumeId: string; jobDescriptionId: string; draftContent: string; reason: string },
+): Promise<ReviewItem> {
+  return request("/api/v1/reviews/resume-draft", {
+    token,
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getCandidateResumeDraftReview(
+  token: string,
+  reviewId: string,
+): Promise<CandidateResumeDraftReview> {
+  return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}`, { token });
 }
 
 export function getCoachReviewDetails(token: string, reviewId: string): Promise<CoachReviewDetails> {

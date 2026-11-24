@@ -51,9 +51,11 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `GET /candidates/me/export` | Candidate | Request/download own data export |
 | `DELETE /candidates/me/data` | Candidate | Start deletion and return job status |
 | `POST /reviews/request` | Candidate owner | Request coach review of own output |
+| `POST /reviews/resume-draft` | Candidate owner | Send the selected generated CV draft to the coach queue with an optional focus note |
+| `GET /reviews/mine` | Candidate | List own review statuses and any coach feedback |
 | `GET /reviews/pending` | Coach | List pending reviews; coach role is checked against the current account |
-| `GET /reviews/{reviewId}` | Assigned coach or candidate owner (status-limited) | Candidate receives status metadata; coach receives owner-scoped content for review |
-| `POST /reviews/{reviewId}/decision` | Assigned coach | Approve/edit/reject with reason |
+| `GET /reviews/{reviewId}` | Coach or candidate owner | Coach receives submitted content; the candidate can retrieve their submitted CV draft |
+| `POST /reviews/{reviewId}/decision` | Assigned coach | Approve/edit/reject a review; for CV drafts, send recommendations or decline |
 | `GET /admin/users` | Admin | List up to 200 safe account records, not candidate content |
 | `POST /admin/users` | Admin | Register a coach account directly with an initial password |
 | `PATCH /admin/users/{userId}/status` | Admin | Deactivate/reactivate candidate and coach accounts; admin accounts require controlled provisioning |
@@ -62,6 +64,8 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `GET /admin/audit-logs` | Admin | Read the latest 250 account and application activity events without request bodies or candidate content |
 
 Admin and coach endpoints re-check the account role against the JSON database for each privileged request. Deactivated users cannot sign in, and existing access tokens are rejected on subsequent requests. Candidate self-registration cannot select a role; candidates cannot be promoted to coaches, which admins instead register directly. Admin accounts require controlled provisioning and cannot be deactivated from this screen. Account-status changes and other authenticated write actions are recorded as metadata-only audit events.
+
+CV drafts are only shared with a coach after the candidate explicitly selects **Send CV draft to coach**. The coach receives the submitted draft snapshot and may return written recommendations; the candidate can view the coach response alongside the model suggestions in Resume Studio.
 
 ## Async job response
 

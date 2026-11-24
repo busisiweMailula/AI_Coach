@@ -190,6 +190,79 @@ describe("Phase 5 AI workflows", () => {
     expect(decision.body.data.status).toBe("approved");
   });
 
+  it("sends a candidate CV draft to a coach and returns recommendations to its owner", async () => {
+    const { resumeId, jobDescriptionId } = await seedResumeAndDescription("Experienced TypeScript developer.");
+    const draftContent = "Candidate Name\nEXPERIENCE\nBuilt and maintained TypeScript APIs.";
+    const submission = await request(app)
+      .post("/api/v1/reviews/resume-draft")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        resumeId: resumeId.toHexString(),
+        jobDescriptionId: jobDescriptionId.toHexString(),
+        draftContent,
+        reason: "Please review the clarity of my experience section.",
+      });
+
+    expect(submission.status).toBe(201);
+    expect(submission.body.data.targetType).toBe("resume_draft");
+    expect(submission.body.data.sourceJobDescriptionId).toBe(jobDescriptionId.toHexString());
+    expect(await database.collection("audit_logs").findOne({
+      actorId: ownerId,
+      action: "coach_cv_review_requested",
+    })).toBeTruthy();
+    const reviewId = submission.body.data.id as string;
+    expect((await request(app)
+      .post("/api/v1/reviews/resume-draft")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        resumeId: resumeId.toHexString(),
+        jobDescriptionId: jobDescriptionId.toHexString(),
+        draftContent,
+        reason: "Duplicate request.",
+      })).status).toBe(409);
+
+    const ownerList = await request(app)
+      .get("/api/v1/reviews/mine")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(ownerList.status).toBe(200);
+    expect(ownerList.body.data.items[0].targetContent).toBeUndefined();
+    expect(ownerList.body.data.items[0].id).toBe(reviewId);
+    expect((await request(app)
+      .get("/api/v1/reviews/mine")
+      .set("Authorization", `Bearer ${otherToken}`)).body.data.items).toHaveLength(0);
+
+    const coachDetails = await request(app)
+      .get(`/api/v1/reviews/${reviewId}`)
+      .set("Authorization", `Bearer ${coachToken}`);
+    expect(coachDetails.status).toBe(200);
+    expect(coachDetails.body.data.target).toEqual({ type: "resume_draft", content: draftContent });
+    expect((await request(app)
+      .get(`/api/v1/reviews/${reviewId}`)
+      .set("Authorization", `Bearer ${otherToken}`)).status).toBe(404);
+
+    const decision = await request(app)
+      .post(`/api/v1/reviews/${reviewId}/decision`)
+      .set("Authorization", `Bearer ${coachToken}`)
+      .send({
+        decision: "edit",
+        reason: "The experience is relevant; make the impact more specific.",
+        editedText: "Add measurable outcomes and clarify the scope of each API you built.",
+      });
+    expect(decision.status).toBe(200);
+    expect(decision.body.data.status).toBe("edited");
+
+    const candidateDetails = await request(app)
+      .get(`/api/v1/reviews/${reviewId}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(candidateDetails.status).toBe(200);
+    expect(candidateDetails.body.data.target.content).toBe(draftContent);
+    const updatedList = await request(app)
+      .get("/api/v1/reviews/mine")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(updatedList.body.data.items[0].decisionText)
+      .toBe("Add measurable outcomes and clarify the scope of each API you built.");
+  });
+
   it("blocks fabricated resume suggestions and enforces external-model consent", async () => {
     await grantResumeConsent();
     const { resumeId, jobDescriptionId } = await seedResumeAndDescription("__test_fabrication_case__");
@@ -367,6 +440,10 @@ describe("Phase 5 AI workflows", () => {
       .send({ answerText: "I would clarify requirements, design a small API, and test it." });
     expect(answer.status).toBe(200);
     expect(answer.body.data.status).toBe("evaluating");
+    expect(await database.collection("audit_logs").findOne({
+      actorId: ownerId,
+      action: "interview_answer_submitted",
+    })).toBeTruthy();
 
     const evaluationJob = await database.collection("jobs").findOne({
       ownerId,

@@ -1,4 +1,5 @@
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
+import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
+import { parseResumeSections } from "./resume-format";
 
 export async function createResumeWordDocument(content: string): Promise<Blob> {
   const paragraphs = formatResumeParagraphs(content);
@@ -47,37 +48,45 @@ export async function createResumeWordDocument(content: string): Promise<Blob> {
 }
 
 function formatResumeParagraphs(content: string): Paragraph[] {
-  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines.length === 0) lines.push("Resume draft");
+  const sections = parseResumeSections(content);
+  const paragraphs: Paragraph[] = [];
+  let isTitle = true;
 
-  return lines.map((line, index) => {
-    if (index === 0) {
-      return new Paragraph({
-        heading: HeadingLevel.TITLE,
-        children: [new TextRun({ text: line, bold: true })],
-      });
-    }
-
-    if (isSectionHeading(line)) {
-      return new Paragraph({
+  for (const section of sections) {
+    if (section.heading) {
+      paragraphs.push(new Paragraph({
         heading: HeadingLevel.HEADING_1,
-        children: [new TextRun({ text: line, bold: true })],
-      });
+        border: {
+          bottom: { style: BorderStyle.SINGLE, size: 6, color: "9AAFC8", space: 4 },
+        },
+        children: [new TextRun({ text: section.heading, bold: true })],
+      }));
     }
 
-    const bullet = line.match(/^(?:[-*•▪●])\s+(.*)$/);
-    if (bullet) {
-      return new Paragraph({
-        bullet: { level: 0 },
-        children: [new TextRun(bullet[1])],
-      });
+    for (const line of section.lines) {
+      const bullet = line.match(/^(?:[-*•▪●])\s+(.*)$/);
+      if (bullet) {
+        paragraphs.push(new Paragraph({
+          bullet: { level: 0 },
+          children: [new TextRun(bullet[1])],
+        }));
+      } else if (isTitle) {
+        paragraphs.push(new Paragraph({
+          heading: HeadingLevel.TITLE,
+          children: [new TextRun({ text: line, bold: true })],
+        }));
+        isTitle = false;
+      } else {
+        paragraphs.push(new Paragraph({ children: [new TextRun(line)] }));
+      }
     }
+  }
 
-    return new Paragraph({ children: [new TextRun(line)] });
-  });
-}
-
-function isSectionHeading(line: string) {
-  return line.toLowerCase() === "accepted cv updates" ||
-    (line.length <= 70 && /^[A-Z0-9][A-Z0-9 &/()'-]*$/.test(line) && /[A-Z]/.test(line));
+  if (paragraphs.length === 0) {
+    paragraphs.push(new Paragraph({
+      heading: HeadingLevel.TITLE,
+      children: [new TextRun({ text: "Resume draft", bold: true })],
+    }));
+  }
+  return paragraphs;
 }

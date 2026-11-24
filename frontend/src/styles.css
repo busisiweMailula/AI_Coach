@@ -670,6 +670,55 @@ button:disabled {
   font-family: inherit;
 }
 
+.resume-preview {
+  max-height: 540px;
+  overflow: auto;
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: #fff;
+  line-height: 1.55;
+}
+
+.resume-preview-section + .resume-preview-section {
+  margin-top: 16px;
+}
+
+.resume-preview-heading {
+  margin: 18px 0 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #9aafc8;
+  color: #2457c5;
+  font-size: 0.95rem;
+  letter-spacing: 0.025em;
+}
+
+.resume-preview-title {
+  margin: 0 0 8px;
+  color: #173b69;
+  font-size: 1.25rem;
+  font-weight: 750;
+}
+
+.resume-preview p {
+  margin: 5px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.resume-preview-bullet {
+  padding-left: 18px;
+  position: relative;
+}
+
+.resume-preview-bullet::before {
+  position: absolute;
+  left: 3px;
+  content: "•";
+  color: #2457c5;
+}
+
 .selector-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 1fr)) auto;

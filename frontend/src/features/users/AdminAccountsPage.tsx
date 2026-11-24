@@ -238,6 +238,41 @@ export default function AdminAccountsPage({ token }: AdminAccountsPageProps) {
 }
 
 function auditActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    resume_uploaded: "Uploaded resume",
+    resume_details_updated: "Updated resume details",
+    job_description_submitted: "Added job description",
+    match_analysis_requested: "Ran match analysis",
+    skill_gap_analysis_requested: "Ran skills gap analysis",
+    resume_suggestions_generated: "Generated resume suggestions",
+    resume_suggestion_accepted: "Accepted resume suggestion",
+    resume_suggestion_rejected: "Rejected resume suggestion",
+    interview_questions_generated: "Generated interview questions",
+    interview_session_started: "Started interview practice",
+    interview_answer_submitted: "Submitted interview answer",
+    interview_evaluation_requested: "Requested interview feedback",
+    career_guidance_requested: "Requested career guidance",
+    coach_review_requested: "Requested coach review",
+    coach_cv_review_requested: "Sent CV draft for coach review",
+    privacy_consent_granted: "Granted privacy consent",
+    privacy_consent_withdrawn: "Withdrew privacy consent",
+    application_action_completed: "Completed application action",
+    "POST /api/v1/resumes/upload": "Uploaded resume",
+    "PATCH /api/v1/resumes/:id": "Updated resume details",
+    "POST /api/v1/jobs/analyze": "Added job description",
+    "POST /api/v1/matching/analyze": "Ran match analysis",
+    "POST /api/v1/skills/gaps": "Ran skills gap analysis",
+    "POST /api/v1/resumes/optimize": "Generated resume suggestions",
+    "POST /api/v1/interviews/generate": "Generated interview questions",
+    "POST /api/v1/interviews": "Started interview practice",
+    "POST /api/v1/interviews/:id/answer": "Submitted interview answer",
+    "POST /api/v1/interviews/:id/evaluate": "Requested interview feedback",
+    "POST /api/v1/career/guidance": "Requested career guidance",
+    "POST /api/v1/reviews/request": "Requested coach review",
+    "POST /api/v1/suggestions/:id/decision": "Reviewed resume suggestion",
+    "PUT /api/v1/candidates/me/consents": "Updated privacy consent",
+  };
+  if (labels[action]) return labels[action];
   if (action === "user_account_status_changed") return "Changed account status";
   if (action === "coach_account_registered") return "Registered coach";
   if (action === "candidate_registered") return "Candidate registered";
