@@ -374,6 +374,18 @@ button:disabled {
   font-weight: 650;
 }
 
+.label-required {
+  color: #2457c5;
+  font-weight: 400;
+  font-size: 0.82rem;
+}
+
+.label-hint {
+  color: #8899aa;
+  font-weight: 400;
+  font-size: 0.82rem;
+}
+
 .portal-panel textarea,
 .role-editor select {
   width: 100%;
@@ -434,6 +446,25 @@ button:disabled {
   overflow-y: auto;
   overflow-wrap: anywhere;
   line-height: 1.55;
+}
+
+.review-video-section {
+  margin: 0 0 20px;
+}
+
+.review-video-section h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  color: #35445c;
+}
+
+.review-video-player {
+  width: 100%;
+  max-width: 640px;
+  max-height: 400px;
+  border-radius: 10px;
+  background: #17243b;
+  display: block;
 }
 
 .review-content h3 {
@@ -941,6 +972,34 @@ button:disabled {
   line-height: 1.5;
 }
 
+.interview-answer-timer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid #dfe5ef;
+  border-radius: 9px;
+  color: #4c5c73;
+  background: #f9fbff;
+  font-size: 0.8rem;
+}
+
+.interview-answer-timer strong {
+  color: #2457c5;
+  font-variant-numeric: tabular-nums;
+  font-size: 1rem;
+}
+
+.interview-answer-timer.warning {
+  border-color: #efc1a8;
+  background: #fff8f4;
+}
+
+.interview-answer-timer.warning strong {
+  color: #a44016;
+}
+
 .interview-answer-label {
   margin-bottom: 7px;
   color: #35445c;
@@ -957,8 +1016,8 @@ button:disabled {
 }
 
 .interview-recognition-controls {
-  display: grid;
-  grid-template-columns: repeat(2, max-content);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 10px 0 16px;
@@ -966,12 +1025,77 @@ button:disabled {
 
 .interview-recognition-controls button {
   min-height: 36px;
+  padding: 7px 14px;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.interview-recognition-controls p {
+  width: 100%;
+  margin: 0;
+  color: #6a778d;
+  font-size: 0.73rem;
+  line-height: 1.5;
+}
+
+.interview-video-recorder {
+  display: grid;
+  gap: 9px;
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid #e6eaf2;
+  border-radius: 10px;
+  background: #fbfcff;
+}
+
+.interview-video-recorder h3 {
+  margin: 0;
+  color: #35445c;
+  font-size: 0.84rem;
+}
+
+.interview-video-recorder .supporting-copy {
+  margin: 0;
+  font-size: 0.74rem;
+}
+
+.interview-video-preview {
+  width: min(100%, 520px);
+  max-height: 360px;
+  border-radius: 8px;
+  background: #17243b;
+}
+
+.interview-video-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.interview-video-actions button,
+.interview-video-download {
+  min-height: 36px;
   padding: 7px 11px;
   font-size: 0.75rem;
 }
 
-.interview-recognition-controls p {
-  grid-column: 1 / -1;
+.interview-video-download {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cbd4e2;
+  border-radius: 9px;
+  color: #30425d;
+  background: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.interview-video-download:hover {
+  color: #30425d;
+  background: #f2f5fa;
+}
+
+.interview-video-status {
   margin: 0;
   color: #6a778d;
   font-size: 0.73rem;
@@ -1016,6 +1140,147 @@ button:disabled {
 
 .interview-feedback {
   margin-top: 18px;
+}
+
+.coach-feedback-panel {
+  margin: 18px 0;
+  padding: 18px 20px;
+  border: 2px solid #2457c5;
+  border-radius: 12px;
+  background: #f0f4ff;
+}
+
+.coach-feedback-panel.coach-feedback-pending {
+  border-color: #d0daf0;
+  background: #f8f9ff;
+  color: #68758a;
+}
+
+.coach-feedback-panel .eyebrow {
+  margin-bottom: 6px;
+  color: #2457c5;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.coach-feedback-body {
+  margin: 8px 0 6px;
+  line-height: 1.65;
+  color: #1a1a2e;
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+}
+
+.coach-feedback-meta {
+  font-size: 0.78rem;
+  color: #8899aa;
+  margin: 0;
+}
+
+/* ── Coach Feedback Inbox ──────────────────────────────────────────────────── */
+
+.coach-inbox {
+  margin-bottom: 28px;
+  padding: 22px 24px;
+  border: 2px solid #2457c5;
+  border-radius: 14px;
+  background: #f0f4ff;
+}
+
+.coach-inbox-heading {
+  margin-bottom: 16px;
+}
+
+.coach-inbox-heading .eyebrow {
+  color: #2457c5;
+  margin-bottom: 4px;
+}
+
+.coach-inbox-heading h2 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  color: #0d1b4b;
+}
+
+.coach-inbox-list {
+  display: grid;
+  gap: 14px;
+}
+
+.coach-inbox-card {
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #c8d8f8;
+}
+
+.coach-inbox-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.coach-inbox-date {
+  font-size: 0.8rem;
+  color: #68758a;
+}
+
+.coach-inbox-status {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+.coach-inbox-status--approved {
+  background: #e6f4ea;
+  color: #1e6b3a;
+}
+
+.coach-inbox-status--edited {
+  background: #fff3e0;
+  color: #8a4a00;
+}
+
+.coach-inbox-status--rejected {
+  background: #fce8e8;
+  color: #9b1c1c;
+}
+
+.coach-inbox-feedback {
+  margin: 0 0 8px;
+  line-height: 1.65;
+  color: #1a1a2e;
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+}
+
+.coach-inbox-request {
+  font-size: 0.8rem;
+  margin: 0;
+  color: #8899aa;
+}
+
+/* ── Feedback badge on dashboard ───────────────────────────────────────────── */
+
+.feedback-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 20px;
+  background: #2457c5;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: middle;
+  line-height: 1;
 }
 
 .interview-feedback-heading {

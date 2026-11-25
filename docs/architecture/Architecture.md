@@ -4,7 +4,7 @@ Status: Phase 2 design with core backend workflows implemented. Instructor revie
 
 ## Purpose and scope
 
-The system helps a candidate prepare for a career opportunity by parsing a resume, analyzing a job description, finding evidence-backed skill gaps, suggesting factual resume improvements, and running typed mock interviews. A career coach reviews flagged AI output. The system is a preparation aid, not a hiring decision system.
+The system helps a candidate prepare for a career opportunity by parsing a resume, analyzing a job description, finding evidence-backed skill gaps, suggesting factual resume improvements, and running mock interviews with typed or browser-transcribed answers. Interview recording has a two-minute timer that runs only during recording and pauses when capture stops, with up to three speech recording attempts. Optional video practice remains in the browser until the candidate submits the interview for coach review, when the clip is uploaded to private local storage and made available to the coach. A career coach reviews flagged AI output. The system is a preparation aid, not a hiring decision system.
 
 ## Decisions
 

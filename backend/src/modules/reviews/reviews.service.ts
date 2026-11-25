@@ -18,6 +18,7 @@ const reviewConfigPath = fileURLToPath(new URL("../../../config/review-threshold
 const reviewDecisionSchema = z.object({
   decision: z.enum(["approve", "edit", "reject"]),
   reason: z.string().trim().min(1).max(2000),
+  coachFeedback: z.string().trim().min(1).max(5000).optional(),
   editedText: z.string().trim().min(1).max(5000).optional(),
 }).strict().superRefine((value, context) => {
   if (value.decision === "edit" && !value.editedText) {
@@ -69,6 +70,7 @@ export async function createReviewItem(input: {
     requestReason: input.requestReason ?? null,
     decisionReason: null,
     decisionText: null,
+    coachFeedback: null,
     decidedBy: null,
     decidedAt: null,
     createdAt: now,
@@ -105,7 +107,15 @@ export async function requestReview(input: {
     targetId,
     status: { $in: ["pending_review", "in_review"] },
   });
-  if (existing) throw new ConflictError("A review is already pending for this item");
+  if (existing) {
+    const updated = await getDb().collection<ReviewItemDocument>("review_items").findOneAndUpdate(
+      { _id: existing._id, status: { $in: ["pending_review", "in_review"] } },
+      { $set: { requestReason: input.reason, updatedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+    if (!updated) throw new ConflictError("Review item is no longer pending");
+    return updated;
+  }
   return createReviewItem({
     ownerId,
     targetType: input.targetType,
@@ -122,6 +132,15 @@ export async function listPendingReviews(): Promise<ReviewItemDocument[]> {
     .find({ status: "pending_review" })
     .sort({ createdAt: 1 })
     .limit(100)
+    .toArray();
+}
+
+export async function listCandidateReviews(ownerId: string): Promise<ReviewItemDocument[]> {
+  return getDb()
+    .collection<ReviewItemDocument>("review_items")
+    .find({ ownerId: new ObjectId(ownerId) })
+    .sort({ createdAt: -1 })
+    .limit(50)
     .toArray();
 }
 
@@ -254,6 +273,7 @@ export async function decideReview(input: {
         assignedCoachId: coachId,
         decisionReason: parsed.data.reason,
         decisionText: parsed.data.editedText ?? null,
+        coachFeedback: parsed.data.coachFeedback ?? null,
         decidedBy: coachId,
         decidedAt: now,
         updatedAt: now,
@@ -316,6 +336,8 @@ export function toReviewResponse(item: ReviewItemDocument) {
     requestReason: item.requestReason,
     decisionReason: item.decisionReason,
     decisionText: item.decisionText,
+    coachFeedback: item.coachFeedback ?? null,
+    videoUrl: item.videoKey ? `/api/v1/reviews/video/${encodeURIComponent(item.videoKey)}` : null,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
   };
