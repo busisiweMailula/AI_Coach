@@ -52,12 +52,27 @@ export const SkillAnalysisSchema = z.object({
 
 export const ResumeSuggestionsSchema = z.object({
   suggestions: z.array(z.object({
-    originalText: z.string().min(1).max(2000),
-    proposedText: z.string().min(1).max(2000),
+    sectionId: z.string().min(1).max(100),
+    entryId: z.string().min(1).max(100).optional(),
+    bulletId: z.string().min(1).max(100).optional(),
+    field: z.enum(["text", "title", "company", "location", "dates"]),
+    operation: z.enum(["replace", "add", "remove"]),
+    proposedText: z.string().max(2000),
     reason: z.string().min(1).max(1000),
-    sourceSnippet: z.string().min(1).max(2000),
+    jobRequirement: z.string().min(1).max(1000),
+    needsUserInput: z.string().min(1).max(1000).optional(),
   })).max(30),
-}).strict();
+}).strict().superRefine((value, context) => {
+  value.suggestions.forEach((suggestion, index) => {
+    if (suggestion.operation !== "remove" && !suggestion.proposedText.trim()) {
+      context.addIssue({
+        code: "custom",
+        path: ["suggestions", index, "proposedText"],
+        message: "Text is required for this operation",
+      });
+    }
+  });
+});
 
 export const QuestionsSchema = z.object({
   questions: z.array(z.object({

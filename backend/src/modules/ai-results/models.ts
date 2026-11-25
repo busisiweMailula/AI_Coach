@@ -23,6 +23,7 @@ export interface JobMatchDocument {
   scoreConfigVersion: string;
   agentExecutionIds: ObjectId[];
   reviewStatus: "not_required" | "pending_review" | "approved" | "edited" | "rejected";
+  reviewedOutput?: string;
   confidence: number;
   flags: string[];
   createdAt: Date;
@@ -47,8 +48,21 @@ export interface ResumeSuggestionDocument {
   proposedText: string;
   reason: string;
   sourceSnippet: string;
+  sectionId?: string;
+  entryId?: string;
+  bulletId?: string;
+  field?: "text" | "title" | "company" | "location" | "dates";
+  operation?: "replace" | "add" | "remove";
+  sectionTitle?: string;
+  locationLabel?: string;
+  jobRequirement?: string;
+  needsUserInput?: string;
+  userInput?: string;
+  baseVersion?: string;
   status: "pending" | "accepted" | "rejected";
+  applicationStatus?: "applied" | "conflict" | "needs_input" | "stale" | "not_applied";
   reviewStatus: "not_required" | "pending_review" | "approved" | "edited" | "rejected";
+  reviewedOutput?: string;
   flags: string[];
   createdAt: Date;
   updatedAt: Date;
@@ -107,6 +121,8 @@ export interface InterviewEvaluationDocument extends AnswerEvaluation {
   sessionId: ObjectId;
   rubricVersion: string;
   overallScore: number;
+  reviewStatus?: "not_required" | "pending_review" | "approved" | "edited" | "rejected";
+  reviewedOutput?: string;
   executionId: ObjectId;
   createdAt: Date;
 }
@@ -118,15 +134,29 @@ export interface ReviewItemDocument {
   targetId: ObjectId;
   flags: string[];
   riskLevel: "low" | "medium" | "high";
-  status: "pending_review" | "in_review" | "approved" | "edited" | "rejected";
+  status: "pending_review" | "in_review" | "approved" | "edited" | "rejected" | "withdrawn";
   assignedCoachId: ObjectId | null;
+  claimedAt?: Date | null;
   requestReason: string | null;
   decisionReason: string | null;
   decisionText: string | null;
+  modifiedOutput?: string | null;
+  originalOutput?: string | null;
+  recommendations?: string[];
+  internalNote?: string | null;
   decidedBy: ObjectId | null;
   decidedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface ReviewHistoryDocument {
+  _id: ObjectId;
+  reviewId: ObjectId;
+  actorId: ObjectId | null;
+  action: string;
+  details: string | null;
+  createdAt: Date;
 }
 
 export interface CandidateProgressDocument {

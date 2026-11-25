@@ -13,7 +13,7 @@
 | Job runner | Queue/status/retry lifecycle | Services/agents, job repository | Treat transient failure as success |
 | Agent runtime | Prompt/provider/schema/execution lifecycle | `LlmProvider`, execution repository | Access domain repositories directly |
 | LLM provider adapter | Provider-specific request/response | Vendor SDK/API | Expose API keys to browser or log prompt secrets |
-| Embedding and vector retrieval | Embed anonymized resume chunks and retrieve owner-scoped evidence | Mistral API and local cosine ranking | Send raw resume text or query another candidate's vectors |
+| Embedding and vector retrieval | Embed four-PII-sanitized resume chunks; store original chunk content and retrieve owner-scoped evidence | Mistral API and local cosine ranking | Send unmasked resume text or query another candidate's vectors |
 | Interview graph | Interview state transitions and pause/resume | Interview services, evaluator agent, checkpointer | Own HTTP semantics or duplicate answer records |
 | Review graph | Review escalation and coach interrupt | Review service, audit repository, checkpointer | Approve itself or bypass role/ownership guards |
 

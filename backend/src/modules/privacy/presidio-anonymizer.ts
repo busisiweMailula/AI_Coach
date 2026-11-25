@@ -7,6 +7,13 @@ import type { ResumeAnonymizer } from "./resume-anonymizer.js";
 const anonymizationResponseSchema = z.object({
   anonymizedText: z.string().min(1),
 });
+const ALLOWED_PLACEHOLDERS = new Set([
+  "<PERSON>",
+  "<PHONE_NUMBER>",
+  "<EMAIL_ADDRESS>",
+  "<ZA_ID_NUMBER>",
+]);
+const PLACEHOLDER_PATTERN = /<[^<>]+>/g;
 
 export interface PresidioAnonymizerOptions {
   serviceUrl?: string;
@@ -70,6 +77,20 @@ export function createPresidioResumeAnonymizer(
       const parsed = anonymizationResponseSchema.safeParse(payload);
       if (!parsed.success || !parsed.data.anonymizedText.trim()) {
         logger.warn("Presidio returned an invalid anonymization response");
+        throw new UpstreamServiceError(
+          "CV anonymization failed; CV content was not sent to an AI service",
+        );
+      }
+
+      const placeholders = parsed.data.anonymizedText.match(PLACEHOLDER_PATTERN) ?? [];
+      const unsupportedPlaceholderCount = placeholders.filter(
+        (placeholder) => !ALLOWED_PLACEHOLDERS.has(placeholder),
+      ).length;
+      if (unsupportedPlaceholderCount > 0) {
+        logger.warn(
+          { unsupportedPlaceholderCount },
+          "Presidio returned unsupported anonymization placeholders",
+        );
         throw new UpstreamServiceError(
           "CV anonymization failed; CV content was not sent to an AI service",
         );

@@ -18,6 +18,8 @@ import type {
   SkillGapDocument,
 } from "../../modules/ai-results/models.js";
 import type { AgentExecutionDocument } from "../llm/agent-execution.model.js";
+import type { NotificationDocument } from "../../modules/notifications/notification.model.js";
+import type { ReviewHistoryDocument } from "../../modules/ai-results/models.js";
 
 export async function ensureIndexes(): Promise<void> {
   const users = getDb().collection<UserDocument>("users");
@@ -87,6 +89,18 @@ export async function ensureIndexes(): Promise<void> {
   await db.collection<ReviewItemDocument>("review_items").createIndex(
     { status: 1, createdAt: 1 },
     { name: "review_items_status_created" },
+  );
+  await db.collection<ReviewHistoryDocument>("review_history").createIndex(
+    { reviewId: 1, createdAt: 1 },
+    { name: "review_history_review_created" },
+  );
+  await db.collection<NotificationDocument>("notifications").createIndex(
+    { dedupeKey: 1 },
+    { unique: true, name: "notifications_dedupe_unique" },
+  );
+  await db.collection<NotificationDocument>("notifications").createIndex(
+    { recipientUserId: 1, createdAt: -1 },
+    { name: "notifications_recipient_created" },
   );
   await db.collection<ReviewItemDocument>("review_items").createIndex(
     { ownerId: 1, targetType: 1, targetId: 1, status: 1 },

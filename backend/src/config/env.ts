@@ -21,6 +21,7 @@ const envSchema = z.object({
   GROQ_API_KEY: z.string().optional(),
   GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-120b"),
   LLM_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(30_000),
+  REVIEW_CLAIM_TIMEOUT_MS: z.coerce.number().int().positive().default(900_000),
   PRESIDIO_URL: z.string().url().default("http://127.0.0.1:5002"),
   PRESIDIO_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(60_000),
   PRESIDIO_API_TOKEN: z.string().min(32).optional(),

@@ -2,10 +2,12 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   ApiError,
   getAdminAuditLogs,
+  getAdminDashboard,
   getAdminUsers,
   registerCoach,
   updateAdminUserStatus,
   type AdminAuditLog,
+  type AdminDashboard,
   type AdminUser,
 } from "../../api/client";
 
@@ -13,13 +15,15 @@ interface AdminAccountsPageProps {
   token: string;
 }
 
-type AdminTab = "users" | "register" | "audit";
+type AdminTab = "dashboard" | "users" | "register" | "audit";
 
 export default function AdminAccountsPage({ token }: AdminAccountsPageProps) {
-  const [tab, setTab] = useState<AdminTab>("users");
+  const [tab, setTab] = useState<AdminTab>("dashboard");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
+  const [dashboard, setDashboard] = useState<AdminDashboard | null>(null);
   const [usersLoading, setUsersLoading] = useState(true);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
   const [auditLoading, setAuditLoading] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [registering, setRegistering] = useState(false);
@@ -41,6 +45,19 @@ export default function AdminAccountsPage({ token }: AdminAccountsPageProps) {
 
   useEffect(() => {
     void loadUsers();
+  }, [token]);
+
+  useEffect(() => {
+    let active = true;
+    setDashboardLoading(true);
+    void getAdminDashboard(token).then((result) => {
+      if (active) setDashboard(result);
+    }).catch((error: unknown) => {
+      if (active) setNotice({ message: errorMessage(error), error: true });
+    }).finally(() => {
+      if (active) setDashboardLoading(false);
+    });
+    return () => { active = false; };
   }, [token]);
 
   async function loadAuditLogs() {
@@ -93,6 +110,7 @@ export default function AdminAccountsPage({ token }: AdminAccountsPageProps) {
   }
 
   const navItems: Array<{ id: AdminTab; title: string; icon: string }> = [
+    { id: "dashboard", title: "Dashboard", icon: "D" },
     { id: "users", title: "Users", icon: "U" },
     { id: "register", title: "Register coach", icon: "+" },
     { id: "audit", title: "Audit logs", icon: "A" },
@@ -129,9 +147,11 @@ export default function AdminAccountsPage({ token }: AdminAccountsPageProps) {
       <main className="admin-main">
         <header className="admin-page-heading">
           <p className="eyebrow">Admin workspace</p>
-          <h1>{tab === "users" ? "Registered users" : tab === "register" ? "Register a coach" : "Audit logs"}</h1>
+          <h1>{tab === "dashboard" ? "Admin dashboard" : tab === "users" ? "Registered users" : tab === "register" ? "Register a coach" : "Audit logs"}</h1>
           <p className="intro">
-            {tab === "users"
+            {tab === "dashboard"
+              ? "Account health, registrations, review queue activity, and recent application events."
+              : tab === "users"
               ? "View registered account metadata and manage account access."
               : tab === "register"
                 ? "Create a new coach account. Candidate accounts cannot be promoted."
@@ -140,6 +160,59 @@ export default function AdminAccountsPage({ token }: AdminAccountsPageProps) {
         </header>
 
         {notice && <p className={`notice${notice.error ? " error" : ""}`} role={notice.error ? "alert" : "status"}>{notice.message}</p>}
+
+        {tab === "dashboard" && (
+          <section className="admin-content-panel" aria-label="Admin dashboard" aria-live="polite">
+            {dashboardLoading ? <p className="supporting-copy">Loading dashboard…</p> : !dashboard ? (
+              <p className="supporting-copy">Dashboard data is unavailable.</p>
+            ) : (
+              <>
+                <h2>Accounts by role</h2>
+                <div className="admin-metric-grid">
+                  {(["candidate", "coach", "admin"] as const).map((role) => (
+                    <button className="admin-metric-card" type="button" key={role} onClick={() => setTab("users")}>
+                      <span>{role === "candidate" ? "Candidates" : role === "coach" ? "Coaches" : "Admins"}</span>
+                      <strong>{dashboard.usersByRole[role].total}</strong>
+                      <small>{dashboard.usersByRole[role].active} active · {dashboard.usersByRole[role].disabled} deactivated</small>
+                    </button>
+                  ))}
+                </div>
+                <div className="admin-dashboard-grid">
+                  <section>
+                    <h2>Registrations</h2>
+                    <p>{dashboard.registrations.last7Days} in the last 7 days · {dashboard.registrations.last30Days} in the last 30 days</p>
+                    <div className="registration-chart" role="img" aria-label="Daily registrations over the last seven days">
+                      {dashboard.registrations.dailyTrend.map((point) => {
+                        const max = Math.max(1, ...dashboard.registrations.dailyTrend.map((day) => day.count));
+                        return <div key={point.date} title={`${point.date}: ${point.count}`}><span style={{ height: `${Math.max(6, point.count / max * 100)}%` }} /><small>{point.date.slice(5)}</small></div>;
+                      })}
+                    </div>
+                  </section>
+                  <section>
+                    <h2>Review queue health</h2>
+                    <p>{dashboard.reviewQueue.pending} pending · {dashboard.reviewQueue.inReview} in review</p>
+                    <p>Oldest waiting: {dashboard.reviewQueue.oldestWaitingAt ? new Date(dashboard.reviewQueue.oldestWaitingAt).toLocaleString() : "None"}</p>
+                    <p>{dashboard.reviewQueue.completedThisWeek} completed this week · average turnaround {dashboard.reviewQueue.averageTurnaroundMinutes === null ? "—" : `${dashboard.reviewQueue.averageTurnaroundMinutes} min`}</p>
+                  </section>
+                  <section>
+                    <h2>Preparation data</h2>
+                    <p>{dashboard.contentCounts.cvs} CVs · {dashboard.contentCounts.jobs} job descriptions · {dashboard.contentCounts.matches} matches</p>
+                    <button className="secondary" type="button" onClick={() => setTab("users")}>Open account list</button>
+                  </section>
+                  <section>
+                    <h2>Recent audit activity</h2>
+                    {dashboard.recentAudit.length === 0 ? <p className="supporting-copy">No recent events.</p> : (
+                      <ul>{dashboard.recentAudit.map((entry) => (
+                        <li key={entry.id}>{entry.actorEmail ?? "System"} · {auditActionLabel(entry.action)} · {new Date(entry.createdAt).toLocaleString()}</li>
+                      ))}</ul>
+                    )}
+                    <button className="secondary" type="button" onClick={() => setTab("audit")}>View audit logs</button>
+                  </section>
+                </div>
+              </>
+            )}
+          </section>
+        )}
 
         {tab === "users" && (
           <section className="admin-content-panel" aria-label="Registered users">

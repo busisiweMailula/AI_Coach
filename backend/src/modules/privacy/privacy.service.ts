@@ -94,4 +94,25 @@ export async function ensureExternalModelConsent(ownerId: string | ObjectId): Pr
   ) {
     throw new ForbiddenError("Consent to external AI processing is required");
   }
+
+}
+
+export async function hasHumanReviewConsent(ownerId: string | ObjectId): Promise<boolean> {
+  const ownerObjectId = typeof ownerId === "string" ? new ObjectId(ownerId) : ownerId;
+  const latest = await getDb()
+    .collection<ConsentDocument>(collectionName)
+    .find({ ownerId: ownerObjectId, purpose: "human_review" })
+    .sort({ recordedAt: -1, _id: -1 })
+    .limit(1)
+    .next();
+  return Boolean(latest &&
+    latest.policyVersion === CONSENT_POLICY_VERSIONS.human_review &&
+    latest.granted &&
+    latest.revokedAt === null);
+}
+
+export async function ensureHumanReviewConsent(ownerId: string | ObjectId): Promise<void> {
+  if (!await hasHumanReviewConsent(ownerId)) {
+    throw new ForbiddenError("Consent to human review is required");
+  }
 }

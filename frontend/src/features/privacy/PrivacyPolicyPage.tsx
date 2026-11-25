@@ -8,7 +8,7 @@ export default function PrivacyPolicyPage() {
         <Link to="/">Return to the application</Link>
       </header>
       <article className="card policy">
-        <p className="eyebrow">Privacy information · Resume processing v3 · External AI processing v2</p>
+        <p className="eyebrow">Privacy information · Resume processing v3 · External AI processing v2 · Human review v1</p>
         <h1>Privacy Policy</h1>
         <p className="intro">This notice explains how the CV Matching Agent handles candidate CVs and related information.</p>
 
@@ -22,7 +22,7 @@ export default function PrivacyPolicyPage() {
         <p>Uploaded files are stored outside the web server's public directory. Candidate records are scoped to the authenticated owner. The JSON file is not encrypted, and the application does not itself configure host file-access controls; the operator must protect local files and backups. JSON storage is temporary and is not suitable for multi-process or production use.</p>
 
         <h2>Consent and withdrawal</h2>
-        <p>Consent is associated with your authenticated account and recorded as a versioned history entry. You can withdraw resume-processing consent in the application. Withdrawal blocks subsequent uploads and CV-based processing; it does not automatically delete files or results already stored.</p>
+        <p>Consent is associated with your authenticated account and recorded as a versioned history entry. Human review is optional. When granted, an authorized coach may access only the candidate, job, CV, and AI result associated with a review, and that access is audited. Withdrawing human-review consent removes pending reviews from the coach queue. You can also withdraw resume-processing consent in the application; withdrawal blocks subsequent uploads and CV-based processing. Neither action automatically deletes files or results already stored.</p>
 
         <h2>Retention and deletion</h2>
         <p>Withdrawal does not delete CVs, extracted text, or results already stored. This application does not currently provide self-service deletion; contact the service operator to request data removal and confirm applicable retention periods.</p>

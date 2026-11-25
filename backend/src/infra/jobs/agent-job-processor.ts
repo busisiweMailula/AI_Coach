@@ -17,7 +17,18 @@ import { checkFabrication } from "../../guardrails/fabrication.js";
 import { findLanguageGuardrailHits, mentionsProtectedTraits } from "../../guardrails/language.js";
 import { calculateMatchScore, scoreForEvidence } from "../../guardrails/scoring.js";
 import { getDb } from "../db/database.js";
-import { prepareResumeTextForAI } from "../../modules/privacy/resume-anonymizer.js";
+import {
+  getAnchoredOriginal,
+  type AnchoredSuggestion,
+  type StructuredCv,
+} from "../../modules/resumes/structured-cv.js";
+import { mapSanitizedSnippetToSource } from "../../modules/resumes/resume-draft.js";
+import {
+  findNovelClaimWords,
+  isCvReadyText,
+  structuredCvVersion,
+} from "../../modules/resumes/resume-suggestions.js";
+import { ensureResumeStructuredCv } from "../../modules/resumes/resumes.service.js";
 import type { AsyncJobDocument } from "./job.model.js";
 import type { JobDescriptionDocument } from "../../modules/jobs/job-description.model.js";
 import type { ResumeDocument } from "../../modules/resumes/resume.model.js";
@@ -34,7 +45,7 @@ import type {
   SkillGapDocument,
 } from "../../modules/ai-results/models.js";
 import { createReviewItem, shouldEscalate } from "../../modules/reviews/reviews.service.js";
-import { ensureExternalModelConsent } from "../../modules/privacy/privacy.service.js";
+import { notify } from "../../modules/notifications/notifications.service.js";
 import { findRelevantResumeEvidence } from "../embeddings/resume-semantic-search.js";
 
 const jobs = () => getDb().collection<AsyncJobDocument>("jobs");
@@ -95,21 +106,20 @@ async function analyzeJobDescription(job: AsyncJobDocument): Promise<{ type: str
     input: { jobDescriptionText: description.normalizedText },
     schema: JobAnalysisSchema,
   });
-  for (const item of [...run.value.requiredSkills, ...run.value.preferredSkills]) {
-    if (!evidenceExists(description.normalizedText, item.evidenceSnippet)) {
-      throw new UpstreamServiceError("Job analysis returned evidence not found in the source text");
-    }
-  }
-  for (const item of run.value.responsibilities) {
-    if (!evidenceExists(description.normalizedText, item.evidenceSnippet)) {
-      throw new UpstreamServiceError("Job analysis returned evidence not found in the source text");
-    }
-  }
+  const requiredSkills = run.value.requiredSkills.filter((item) =>
+    evidenceExists(description.normalizedText, item.evidenceSnippet));
+  const preferredSkills = run.value.preferredSkills.filter((item) =>
+    evidenceExists(description.normalizedText, item.evidenceSnippet));
+  const responsibilities = run.value.responsibilities.filter((item) =>
+    evidenceExists(description.normalizedText, item.evidenceSnippet));
   await descriptions().updateOne(
     { _id: description._id, ownerId: job.ownerId },
     {
       $set: {
         ...run.value,
+        requiredSkills,
+        preferredSkills,
+        responsibilities,
         analysisStatus: "succeeded",
         analyzerVersion: "jd-analyzer-v1",
         agentExecutionIds: [run.executionId],
@@ -124,21 +134,39 @@ async function parseResume(job: AsyncJobDocument): Promise<{ type: string; id: O
   const resumeId = requiredObjectId(job.resultId, "Resume reference is missing");
   const resume = await resumes().findOne({ _id: resumeId, ownerId: job.ownerId });
   if (!resume) throw new NotFoundError("Resume not found");
-  const anonymizedResumeText = await prepareResumeTextForAI(
-    job.ownerId.toHexString(),
-    resume.extractedText,
-  );
   const run = await runAgent({
     ownerId: job.ownerId,
     task: "resume_parser",
     promptVersion: "resume-parser-v1",
-    input: { resumeText: anonymizedResumeText },
+    input: { resumeText: resume.extractedText },
     schema: ResumeParseSchema,
     requiresResumeProcessingConsent: true,
   });
-  const validSkills = run.value.skills.filter((item) => evidenceExists(anonymizedResumeText, item.evidenceSnippet));
-  const validWorkHistory = run.value.workHistory.filter((item) => evidenceExists(anonymizedResumeText, item.evidenceSnippet));
-  const validEducation = run.value.education.filter((item) => evidenceExists(anonymizedResumeText, item.evidenceSnippet));
+  const sanitizedResumeText = run.sanitizedInput.resumeText;
+  const validSkills = run.value.skills.flatMap((item) => {
+    const evidenceSnippet = mapSanitizedSnippetToSource(
+      resume.extractedText,
+      sanitizedResumeText,
+      item.evidenceSnippet,
+    );
+    return evidenceSnippet ? [{ ...item, evidenceSnippet }] : [];
+  });
+  const validWorkHistory = run.value.workHistory.flatMap((item) => {
+    const evidenceSnippet = mapSanitizedSnippetToSource(
+      resume.extractedText,
+      sanitizedResumeText,
+      item.evidenceSnippet,
+    );
+    return evidenceSnippet ? [{ ...item, evidenceSnippet }] : [];
+  });
+  const validEducation = run.value.education.flatMap((item) => {
+    const evidenceSnippet = mapSanitizedSnippetToSource(
+      resume.extractedText,
+      sanitizedResumeText,
+      item.evidenceSnippet,
+    );
+    return evidenceSnippet ? [{ ...item, evidenceSnippet }] : [];
+  });
   const flags = [...run.value.uncertaintyFlags];
   if (validSkills.length !== run.value.skills.length ||
       validWorkHistory.length !== run.value.workHistory.length ||
@@ -177,18 +205,11 @@ async function analyzeMatch(job: AsyncJobDocument): Promise<{ type: string; id: 
     descriptions().findOne({ _id: jobDescriptionId, ownerId: job.ownerId }),
   ]);
   if (!resume || !description) throw new NotFoundError("Resume or job description not found");
-  const anonymizedResumeText = await prepareResumeTextForAI(
-    job.ownerId.toHexString(),
-    resume.extractedText,
-  );
-  if (env.EMBEDDING_PROVIDER === "mistral") {
-    await ensureExternalModelConsent(job.ownerId);
-  }
   const relevantResumeEvidence = env.EMBEDDING_PROVIDER === "mistral"
     ? await findRelevantResumeEvidence({
         ownerId: job.ownerId,
         resumeId,
-        anonymizedResumeText,
+        resumeText: resume.extractedText,
         queryText: buildMatchQuery(description),
       })
     : [];
@@ -201,7 +222,7 @@ async function analyzeMatch(job: AsyncJobDocument): Promise<{ type: string; id: 
     task: "skill_gap_analyzer",
     promptVersion: "skill-gap-analyzer-v1",
     input: {
-      resumeText: anonymizedResumeText,
+      resumeText: resume.extractedText,
       relevantResumeEvidence,
       requiredSkills: description.requiredSkills ?? [],
       preferredSkills: description.preferredSkills ?? [],
@@ -209,6 +230,7 @@ async function analyzeMatch(job: AsyncJobDocument): Promise<{ type: string; id: 
     schema: SkillAnalysisSchema,
     requiresResumeProcessingConsent: true,
   });
+  const sanitizedResumeText = run.sanitizedInput.resumeText;
 
   const flags: string[] = [];
   const results = requestedSkills.map((skill) => {
@@ -216,14 +238,23 @@ async function analyzeMatch(job: AsyncJobDocument): Promise<{ type: string; id: 
     if (!classified || classified.status === "no_evidence_found") {
       return { name: skill.name, status: "no_evidence_found" as const };
     }
-    if (!classified.evidenceSnippet || !evidenceExists(anonymizedResumeText, classified.evidenceSnippet)) {
+    if (!classified.evidenceSnippet || !evidenceExists(sanitizedResumeText, classified.evidenceSnippet)) {
+      flags.push("evidence_not_found_in_source");
+      return { name: skill.name, status: "no_evidence_found" as const };
+    }
+    const evidenceSnippet = mapSanitizedSnippetToSource(
+      resume.extractedText,
+      sanitizedResumeText,
+      classified.evidenceSnippet,
+    );
+    if (!evidenceSnippet) {
       flags.push("evidence_not_found_in_source");
       return { name: skill.name, status: "no_evidence_found" as const };
     }
     return {
       name: skill.name,
       status: classified.status,
-      evidenceSnippet: classified.evidenceSnippet,
+      evidenceSnippet,
     };
   });
   if (mentionsProtectedTraits(JSON.stringify(run.value))) {
@@ -254,7 +285,7 @@ async function analyzeMatch(job: AsyncJobDocument): Promise<{ type: string; id: 
   const requiredValues = [...requiredNames].map((name) => resultValues.get(name) ?? 0);
   const preferredValues = (description.preferredSkills ?? []).map((item) => resultValues.get(normalize(item.name)) ?? 0);
   const responsibilityValues = (description.responsibilities ?? []).map((item) => (
-    evidenceExists(anonymizedResumeText, item.evidenceSnippet) ? 1 : 0
+    evidenceExists(resume.extractedText, item.evidenceSnippet) ? 1 : 0
   ));
   const quality = results.length
     ? results.filter((item) => item.status !== "no_evidence_found" && item.evidenceSnippet).length / results.length
@@ -319,34 +350,87 @@ async function createSuggestions(job: AsyncJobDocument): Promise<{ type: string;
       : Promise.resolve(null),
   ]);
   if (!resume || (jobDescriptionId && !description)) throw new NotFoundError("Resume or job description not found");
-  const anonymizedResumeText = await prepareResumeTextForAI(
-    job.ownerId.toHexString(),
-    resume.extractedText,
-  );
+  const structuredCv = await ensureResumeStructuredCv(resume);
+  if (!structuredCv.lossless.verified) {
+    throw new ValidationError("The CV structure could not be verified against its source text");
+  }
+  const promptSections = structuredCv.sections.map((section) => ({
+    sectionId: section.id,
+    sectionTitle: section.heading,
+    sectionType: section.type,
+    ...(section.type === "summary"
+      ? { contentText: section.paragraphs.map((line) => line.text).join("\n") }
+      : section.type === "experience" || section.type === "projects"
+      ? {
+          entries: section.entries.map((entry) => ({
+            entryId: entry.id,
+            label: [entry.title, entry.company, entry.location].filter(Boolean).join(", "),
+            title: entry.title,
+            company: entry.company,
+            location: entry.location,
+            dates: entry.dates,
+            bullets: entry.lines.map((line) => ({ bulletId: line.id, text: line.text })),
+          })),
+        }
+      : section.type === "technical_skills" || section.type === "core_competencies"
+        ? { groups: section.groups.map((group) => ({ bulletId: group.id, label: group.label, text: group.value })) }
+        : { content: section.paragraphs.map((line) => ({ bulletId: line.id, kind: line.kind, text: line.text })) }),
+  }));
   const run = await runAgent({
     ownerId: job.ownerId,
     task: "resume_coach",
     promptVersion: "resume-coach-v1",
-    input: { resumeText: anonymizedResumeText, jobDescriptionText: description?.normalizedText ?? null },
+    input: { sections: promptSections, jobDescriptionText: description?.normalizedText ?? null },
     schema: ResumeSuggestionsSchema,
+    instructions: [
+      "Create only CV-ready final edits anchored to the supplied sectionId, entryId, and bulletId values.",
+      "Never return original text; the server obtains it from the candidate's stored CV.",
+      "Never add or infer facts, titles, employers, dates, numbers, credentials, deployments, production use, or real users.",
+      "If a truthful edit needs a fact not in the CV, set needsUserInput to ask the candidate to supply it; do not put instructions, questions, placeholders, or advice in proposedText.",
+      "Use only IDs that appear in the supplied sections. Keep proposedText a final replacement, addition, or an empty string for remove.",
+    ].join(" "),
     requiresResumeProcessingConsent: true,
   });
+  const sanitizedResumeText = JSON.stringify(run.sanitizedInput.sections);
   const savedIds: ObjectId[] = [];
   for (const item of run.value.suggestions) {
-    const supported = evidenceExists(anonymizedResumeText, item.sourceSnippet) &&
-      evidenceExists(anonymizedResumeText, item.originalText);
-    const factual = checkFabrication(item.proposedText, anonymizedResumeText);
-    if (!supported || !factual.safe || findLanguageGuardrailHits(item.proposedText).length > 0) continue;
+    const target: AnchoredSuggestion = { ...item, sectionId: item.sectionId };
+    const originalText = getAnchoredOriginal(structuredCv, target);
+    if (originalText === null || (item.operation !== "remove" && !isCvReadyText(item.proposedText)) ||
+      findLanguageGuardrailHits(item.proposedText).length > 0 ||
+      mentionsProtectedTraits(item.proposedText)) continue;
+    const factual = checkFabrication(item.proposedText, sanitizedResumeText);
+    const novelClaims = findNovelClaimWords(item.proposedText, sanitizedResumeText);
+    const needsConfirmation = !factual.safe || novelClaims.length > 0;
+    const flags = needsConfirmation ? ["needs_user_confirmation"] : [];
+    const needsUserInput = item.needsUserInput ?? (needsConfirmation
+      ? "Confirm that the new factual details are accurate, or edit the proposed text to use only information in your CV."
+      : undefined);
+    const location = describeSuggestionLocation(structuredCv, item);
+    if (!location) continue;
     const suggestionId = new ObjectId();
     const suggestion: ResumeSuggestionDocument = {
       _id: suggestionId,
       ownerId: job.ownerId,
       resumeId,
       jobDescriptionId,
-      ...item,
+      originalText,
+      proposedText: item.proposedText,
+      reason: item.reason,
+      sourceSnippet: originalText,
+      sectionId: item.sectionId,
+      ...(item.entryId ? { entryId: item.entryId } : {}),
+      ...(item.bulletId ? { bulletId: item.bulletId } : {}),
+      field: item.field,
+      operation: item.operation,
+      sectionTitle: location.sectionTitle,
+      locationLabel: location.locationLabel,
+      jobRequirement: item.jobRequirement,
+      ...(needsUserInput ? { needsUserInput } : {}),
+      baseVersion: structuredCvVersion(structuredCv),
       status: "pending",
       reviewStatus: "not_required",
-      flags: [],
+      flags,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -357,6 +441,36 @@ async function createSuggestions(job: AsyncJobDocument): Promise<{ type: string;
     throw new Error("FABRICATION_GUARDRAIL_HIT");
   }
   return { type: "resume_suggestion", id: savedIds[0] ?? new ObjectId() };
+}
+
+function describeSuggestionLocation(
+  cv: StructuredCv,
+  target: Pick<AnchoredSuggestion, "sectionId" | "entryId" | "bulletId" | "field">,
+): { sectionTitle: string; locationLabel: string } | null {
+  const section = cv.sections.find((item) => item.id === target.sectionId);
+  if (!section) return null;
+  const parts = [section.heading];
+  if (target.entryId) {
+    const entry = section.entries.find((item) => item.id === target.entryId);
+    if (!entry) return null;
+    parts.push([entry.title, entry.company].filter(Boolean).join(", ") || "Entry");
+    if (target.bulletId) {
+      const index = entry.lines.findIndex((line) => line.id === target.bulletId);
+      if (index < 0) return null;
+      parts.push(`bullet ${index + 1}`);
+    } else if (target.field !== "text") {
+      parts.push(target.field);
+    }
+  } else if (target.bulletId) {
+    const group = section.groups.find((item) => item.id === target.bulletId);
+    if (group) parts.push(group.label || "Skills group");
+    else {
+      const index = section.paragraphs.findIndex((line) => line.id === target.bulletId);
+      if (index < 0) return null;
+      parts.push(section.paragraphs[index]?.kind === "bullet" ? `bullet ${index + 1}` : `item ${index + 1}`);
+    }
+  }
+  return { sectionTitle: section.heading, locationLabel: parts.join(" › ") };
 }
 
 async function generateQuestions(job: AsyncJobDocument): Promise<{ type: string; id: ObjectId }> {
@@ -381,15 +495,12 @@ async function generateQuestions(job: AsyncJobDocument): Promise<{ type: string;
   if (interviewType !== "technical" && interviewType !== "behavioral" && interviewType !== "both") {
     throw new ValidationError("Interview type is invalid");
   }
-  const anonymizedResumeText = resume
-    ? await prepareResumeTextForAI(job.ownerId.toHexString(), resume.extractedText)
-    : null;
   const run = await runAgent({
     ownerId: job.ownerId,
     task: "question_generator",
     promptVersion: "question-generator-v2",
     input: {
-      resumeText: anonymizedResumeText,
+      resumeText: resume?.extractedText ?? null,
       jobDescriptionText: description.normalizedText,
       questionCount: requestedCount,
       interviewType,
@@ -538,6 +649,19 @@ async function evaluateInterview(job: AsyncJobDocument): Promise<{ type: string;
     });
   }
   await updateCandidateProgress(job.ownerId);
+
+  // ── Notify the candidate that their interview feedback is ready ──
+  await notify({
+    recipientUserId: job.ownerId,
+    type: "interview_feedback_ready",
+    title: "Interview feedback is ready",
+    message: "Your interview evaluation has been completed. View your personalised feedback now.",
+    link: "/interviews",
+    entityType: "interview_evaluation",
+    entityId: evaluationId,
+    dedupeKey: `interview_evaluation:${evaluationId.toHexString()}:feedback_ready`,
+  });
+
   return { type: "interview_evaluation", id: evaluationId };
 }
 

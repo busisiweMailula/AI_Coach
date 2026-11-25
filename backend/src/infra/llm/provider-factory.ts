@@ -81,13 +81,18 @@ class TestMockProvider implements LlmProvider {
       });
     }
     if (request.task === "resume_coach") {
-      if (String(input.resumeText ?? "").includes("__test_fabrication_case__")) {
+      const sections = Array.isArray(input.sections)
+        ? input.sections as Array<{ sectionId?: string }>
+        : [];
+      if (JSON.stringify(input.sections).includes("__test_fabrication_case__")) {
         return mockCompletion(request, {
           suggestions: [{
-            originalText: "__test_fabrication_case__",
+            sectionId: sections[0]?.sectionId ?? "missing-section",
+            field: "text",
+            operation: "replace",
             proposedText: "Delivered 900% faster API processing.",
             reason: "Add impact.",
-            sourceSnippet: "__test_fabrication_case__",
+            jobRequirement: "Improve measured API throughput.",
           }],
         });
       }

@@ -1,63 +1,38 @@
-export interface ResumeDraftSuggestion {
-  originalText: string;
-  proposedText: string;
-}
-
-interface Replacement {
-  start: number;
-  end: number;
-  text: string;
-}
-
 interface NormalizedText {
   value: string;
   startOffsets: number[];
   endOffsets: number[];
 }
 
-export function buildResumeDraft(
+export function mapSanitizedSnippetToSource(
   sourceText: string,
-  anonymizedText: string,
-  suggestions: ResumeDraftSuggestion[],
-): string {
+  sanitizedText: string,
+  snippet: string,
+): string | null {
   const source = normalizeWithOffsets(sourceText);
-  const anonymized = normalizeWithOffsets(anonymizedText);
-  const replacements: Replacement[] = [];
-  const unplacedSuggestions: string[] = [];
+  const sanitized = normalizeWithOffsets(sanitizedText);
+  const normalizedSnippet = normalizeWithOffsets(snippet).value.toLocaleLowerCase("en");
+  if (!normalizedSnippet) return null;
 
-  for (const suggestion of suggestions) {
-    const originalText = normalizeWithOffsets(suggestion.originalText).value;
-    const anonymizedStart = findUniqueOccurrence(anonymized.value, originalText);
-    const sourceRange = anonymizedStart === null
-      ? null
-      : findUniqueRange(source, originalText) ??
-        mapRangeToSource(anonymized, source, anonymizedStart, anonymizedStart + originalText.length);
-    if (sourceRange) replacements.push({ ...sourceRange, text: suggestion.proposedText });
-    else unplacedSuggestions.push(suggestion.proposedText);
+  const sanitizedValue = sanitized.value.toLocaleLowerCase("en");
+  const sourceValue = source.value.toLocaleLowerCase("en");
+  if (!normalizedSnippet.includes("<") && sourceValue.includes(normalizedSnippet)) {
+    const sourceStart = sourceValue.indexOf(normalizedSnippet);
+    return sourceText.slice(
+      source.startOffsets[sourceStart] ?? 0,
+      source.endOffsets[sourceStart + normalizedSnippet.length - 1] ?? sourceText.length,
+    );
   }
-
-  const ordered = [...replacements].sort((left, right) => left.start - right.start);
-  const overlapping = new Set<Replacement>();
-  for (let left = 0; left < ordered.length; left += 1) {
-    for (let right = left + 1; right < ordered.length && ordered[right].start < ordered[left].end; right += 1) {
-      overlapping.add(ordered[left]);
-      overlapping.add(ordered[right]);
-    }
-  }
-  const safeReplacements = ordered.filter((replacement) => !overlapping.has(replacement));
-  unplacedSuggestions.push(...[...overlapping].map((replacement) => replacement.text));
-
-  let draft = sourceText;
-  for (const replacement of [...safeReplacements].reverse()) {
-    draft = `${draft.slice(0, replacement.start)}${replacement.text}${draft.slice(replacement.end)}`;
-  }
-
-  const normalizedDraft = normalizeWithOffsets(draft).value;
-  const updates = [...new Set(unplacedSuggestions)].filter((text) =>
-    !normalizedDraft.includes(normalizeWithOffsets(text).value));
-  if (updates.length === 0) return draft;
-  const acceptedUpdates = updates.map((text) => `- ${text}`).join("\n");
-  return `${draft.trimEnd()}\n\nAccepted CV updates\n${acceptedUpdates}`;
+  const sanitizedStart = findUniqueOccurrence(sanitizedValue, normalizedSnippet);
+  if (sanitizedStart === null) return null;
+  const sourceRange = findUniqueRange({ ...source, value: sourceValue }, normalizedSnippet) ??
+    mapRangeToSource(
+      { ...sanitized, value: sanitizedValue },
+      { ...source, value: sourceValue },
+      sanitizedStart,
+      sanitizedStart + normalizedSnippet.length,
+    );
+  return sourceRange ? sourceText.slice(sourceRange.start, sourceRange.end) : null;
 }
 
 function normalizeWithOffsets(text: string): NormalizedText {
@@ -124,7 +99,8 @@ function mapRangeToSource(
     : findContextBoundary(anonymizedText.value.slice(0, start), sourceText.value, "suffix");
   const sourceEndBoundary = end === anonymizedText.value.length
     ? sourceText.value.length
-    : findContextBoundary(anonymizedText.value.slice(end), sourceText.value, "prefix");
+    : findContextBoundary(anonymizedText.value.slice(end), sourceText.value, "prefix") ??
+      findMatchingSuffixBoundary(anonymizedText.value.slice(end), sourceText.value);
   if (sourceStartBoundary === null || sourceEndBoundary === null) return null;
 
   const sourceStart = sourceStartBoundary === 0 ? 0 : sourceText.endOffsets[sourceStartBoundary - 1];
@@ -133,6 +109,15 @@ function mapRangeToSource(
     : sourceText.startOffsets[sourceEndBoundary];
   if (sourceStart > sourceEnd) return null;
   return { start: sourceStart, end: sourceEnd };
+}
+
+function findMatchingSuffixBoundary(context: string, sourceText: string): number | null {
+  if (!context || !sourceText) return null;
+  for (let length = Math.min(context.length, 3); length > 0; length -= 1) {
+    const suffix = context.slice(0, length);
+    if (sourceText.endsWith(suffix)) return sourceText.length - suffix.length;
+  }
+  return null;
 }
 
 function findContextBoundary(

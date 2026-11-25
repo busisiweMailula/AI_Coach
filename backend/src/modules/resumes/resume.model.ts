@@ -1,4 +1,5 @@
 import type { ObjectId } from "mongodb";
+import type { StructuredCv } from "./structured-cv.js";
 
 export type ResumeParseStatus = "uploaded" | "queued" | "parsed" | "failed";
 
@@ -11,6 +12,7 @@ export interface ResumeDocument {
   sha256: string;
   storageKey: string;
   extractedText: string;
+  structuredCv?: StructuredCv;
   textExtractionStatus: "extracted" | "empty";
   parseStatus: ResumeParseStatus;
   parseJobId?: ObjectId;

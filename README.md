@@ -24,7 +24,7 @@ The core backend is implemented for authentication, secure intake, consent, AI p
 
 ## Local development
 
-1. Copy `.env.example` to `.env`, set `JWT_SECRET` and `PRESIDIO_API_TOKEN` to random values of at least 32 characters, and provide `INCEPTION_API_KEY`, `GROQ_API_KEY`, and `MISTRAL_API_KEY`. `EMBEDDING_PROVIDER=mistral` enables semantic matching. The configured `inception` provider uses Mercury 3 first and falls back to Groq's `openai/gpt-oss-120b` on network failures, timeouts, HTTP 410/429, or 5xx responses. To migrate to Groq before Inception's shutdown, set `LLM_PROVIDER=groq`; the app then uses `GROQ_MODEL`. Set `LLM_PROVIDER=disabled` to disable AI workflows. OpenAI API usage is billed separately from ChatGPT and is not enabled by this configuration. The Inception Mercury API is scheduled to stop serving requests after December 28, 2026; migrate before then. External processing also requires the candidate's `external_model_processing` consent. Only Presidio-processed resume text is sent to Mistral for embeddings. The `mock` provider is reserved for tests.
+1. Copy `.env.example` to `.env`, set `JWT_SECRET` and `PRESIDIO_API_TOKEN` to random values of at least 32 characters, and provide `INCEPTION_API_KEY`, `GROQ_API_KEY`, and `MISTRAL_API_KEY`. `EMBEDDING_PROVIDER=mistral` enables semantic matching. The configured `inception` provider uses Mercury 3 first and falls back to Groq's `openai/gpt-oss-120b` on network failures, timeouts, HTTP 410/429, or 5xx responses. To migrate to Groq before Inception's shutdown, set `LLM_PROVIDER=groq`; the app then uses `GROQ_MODEL`. Set `LLM_PROVIDER=disabled` to disable AI workflows. OpenAI API usage is billed separately from ChatGPT and is not enabled by this configuration. The Inception Mercury API is scheduled to stop serving requests after December 28, 2026; migrate before then. External processing also requires the candidate's `external_model_processing` consent. The app stores original resume text and evidence locally; only text processed by Presidio, masking the four configured PII types, is sent to Mistral for embeddings or to an LLM. The `mock` provider is reserved for tests.
 2. The backend creates `.data/ai-coach.json` automatically. Set `JSON_DB_PATH` to change its location. Keep this file and its backups private: it contains candidate information and is not encrypted. Run only one API process against a JSON data file. This temporary store does not provide production-grade concurrency, durability, or database protections.
 3. Create and install the Presidio Python virtual environment:
 
@@ -32,13 +32,22 @@ The core backend is implemented for authentication, secure intake, consent, AI p
    Set-Location presidio-service
    py -3.13 -m venv .venv
    .\.venv\Scripts\Activate.ps1
-   python -m pip install --upgrade pip
-   python -m pip install -r requirements.txt
+   .\.venv\Scripts\python.exe -m pip install --upgrade pip
+   .\.venv\Scripts\python.exe -m pip install -r .\requirements.txt
    $env:PRESIDIO_API_TOKEN = "use-the-same-random-token-from-the-root-env-file"
-   python .\app.py
+   .\.venv\Scripts\python.exe .\app.py
    ```
 
-   The service binds to loopback by default. It analyzes English text with Presidio and the `en_core_web_sm` spaCy model. Detection is not guaranteed to find every personal detail; review the output and configure/test recognizers for your use case.
+   The service binds to loopback by default. It masks email addresses, South African mobile numbers, detected person names, and checksum/date-validated 13-digit South African ID numbers. The `PERSON` threshold defaults to `0.6`; the editable `person_allowlist.json` prevents common CV and technology terms from being masked. The default `en_core_web_sm` model is smaller and faster; `en_core_web_lg` is a larger optional model that needs separate installation and more memory, and is not guaranteed to eliminate name errors. Set `PRESIDIO_SPACY_MODEL` and `PRESIDIO_PERSON_SCORE_THRESHOLD` to configure the service. Check the running code with `Invoke-RestMethod http://127.0.0.1:5002/health`; its version combines the Git commit and source hash.
+   To restart a previously launched local service from this terminal, stop the existing listener, load the API token from the root `.env`, then start the updated source:
+
+   ```powershell
+   $listeners = Get-NetTCPConnection -LocalPort 5002 -State Listen -ErrorAction SilentlyContinue
+   $listeners | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ }
+   $tokenLine = Get-Content ..\.env | Where-Object { $_ -match '^PRESIDIO_API_TOKEN=' } | Select-Object -First 1
+   $env:PRESIDIO_API_TOKEN = $tokenLine.Substring('PRESIDIO_API_TOKEN='.Length).Trim().Trim('"')
+   .\.venv\Scripts\python.exe .\app.py
+   ```
 4. Install and start the API in a separate terminal:
 
    ```powershell
@@ -46,6 +55,19 @@ The core backend is implemented for authentication, secure intake, consent, AI p
    npm install
    npm run dev
    ```
+
+### Rebuild resume search data
+
+Older match results and vector chunks may contain broad-redaction placeholders. Resume uploads retain original extracted text locally, so reindexing rebuilds vectors from that source. The embedding request still masks only the four PII types; the original chunks are retained for owner-scoped retrieval and evidence display. There is no BM25 index in this repository. Existing match/evidence results remain historical until you run matching again after reindexing.
+
+Run from the `backend` directory after Presidio and Mistral configuration are available:
+
+```powershell
+npm run reingest:resumes -- --dry-run
+npm run reingest:resumes
+```
+
+The script is idempotent and reports resume/chunk counts without printing CV contents. If a resume has no stored `extractedText` (for example, because it was deleted or never persisted), it must be re-uploaded before its index can be rebuilt.
 
 5. Check `http://localhost:4000/api/v1/health`.
 6. In a separate terminal, install and start the React frontend:
@@ -84,6 +106,7 @@ Open the frontend at `http://localhost:3000`; the frontend web server proxies `/
 - `POST /api/v1/matching/analyze`, `GET /api/v1/matches/:matchId`
 - `POST /api/v1/skills/gaps`, `GET /api/v1/skills/gaps/:gapId`
 - `POST /api/v1/resumes/optimize`, `GET /api/v1/suggestions`, `POST /api/v1/suggestions/:suggestionId/decision`
+- `GET /api/v1/resumes/:resumeId/cv/preview`, `GET /api/v1/resumes/:resumeId/cv/download`
 - `POST /api/v1/interviews/generate`, `GET /api/v1/interviews/question-sets/:questionSetId`
 - `POST /api/v1/interviews`, `GET /api/v1/interviews/:sessionId`, `POST /api/v1/interviews/:sessionId/answer`, `POST /api/v1/interviews/:sessionId/evaluate`, `GET /api/v1/interviews/:sessionId/results`
 - `GET /api/v1/candidates/me/progress`
@@ -98,6 +121,8 @@ Run **API health**, **Register candidate**, then **Login candidate**. Login save
 To run **Start match analysis**, first upload a CV and create a job description while signed in as the same candidate. Alternatively, run **List resumes** and **List job descriptions** to copy the latest owned IDs into the collection variables. The `resumeId` and `jobDescriptionId` values must each be 24-character MongoDB ObjectIds.
 
 Resume uploads accept PDF/DOCX, validate file signatures and extract source text, then store the file in private local storage. Upload requires active resume-processing consent. Job descriptions accept pasted text or PDF/DOCX/TXT uploads and create persisted analysis jobs. Parsing, matching, skill-gap analysis, factual resume suggestions, question generation, and interview evaluation use validated AI outputs and persisted job status. Matching scores are calculated in code; uncertain or flagged results can be sent for human review. Candidate data endpoints are owner-scoped, and interview/review workflow state is checkpointed without storing answer bodies in graph state.
+
+Resume suggestions target structured CV section, entry, and bullet IDs rather than searching model-generated “before” text. Accept/reject decisions are reversible; the preview and editable DOCX download are derived from the stored source CV and accepted suggestions. Suggestions that need facts from the candidate or conflict with another accepted edit remain unapplied until resolved.
 
 The consent and upload interface is a React + TypeScript SPA in `frontend/`. Candidates separately consent to CV processing and sending only the Presidio-processed text to an external model. Consent policy versions are controlled by the server, and each grant or withdrawal creates a new history record. The updated policies require renewed consent; the application does not claim POPIA compliance.
 

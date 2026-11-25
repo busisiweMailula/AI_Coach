@@ -10,6 +10,10 @@ import { validateBody } from "../../middleware/validate.js";
 import { recordAuditEvent } from "./audit-log.service.js";
 import type { AuditLogDocument } from "./audit-log.model.js";
 import type { UserDocument, UserRole } from "./user.model.js";
+import type { ReviewItemDocument } from "../ai-results/models.js";
+import type { ResumeDocument } from "../resumes/resume.model.js";
+import type { JobDescriptionDocument } from "../jobs/job-description.model.js";
+import type { JobMatchDocument } from "../ai-results/models.js";
 
 const statusSchema = z.object({
   status: z.enum(["active", "disabled"]),
@@ -21,6 +25,81 @@ const coachRegistrationSchema = z.object({
 
 export const adminRouter = Router();
 adminRouter.use(authMiddleware, requireCurrentRole("admin"));
+
+adminRouter.get(
+  "/dashboard",
+  asyncHandler(async (_req, res) => {
+    const db = getDb();
+    const [users, reviews, resumes, jobs, matches, recentAudit] = await Promise.all([
+      db.collection<UserDocument>("users").find({}).toArray(),
+      db.collection<ReviewItemDocument>("review_items").find({}).toArray(),
+      db.collection<ResumeDocument>("resumes").find({}).toArray(),
+      db.collection<JobDescriptionDocument>("job_descriptions").find({}).toArray(),
+      db.collection<JobMatchDocument>("job_matches").find({}).toArray(),
+      db.collection<AuditLogDocument>("audit_logs").find({}).sort({ createdAt: -1 }).limit(10).toArray(),
+    ]);
+    const now = Date.now();
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(now - (6 - index) * 24 * 60 * 60 * 1000);
+      return date.toISOString().slice(0, 10);
+    });
+    const registrations = (periodDays: number) => users.filter((user) =>
+      user.createdAt.getTime() >= now - periodDays * 24 * 60 * 60 * 1000).length;
+    const queue = reviews.filter((item) => item.status === "pending_review" || item.status === "in_review");
+    const completedThisWeek = reviews.filter((item) =>
+      ["approved", "edited", "rejected"].includes(item.status) &&
+      item.decidedAt && item.decidedAt.getTime() >= now - 7 * 24 * 60 * 60 * 1000);
+    const turnaround = completedThisWeek.flatMap((item) =>
+      item.decidedAt ? [(item.decidedAt.getTime() - item.createdAt.getTime()) / 60_000] : []);
+    const oldest = queue.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+    const roles = {
+      candidate: { total: 0, active: 0, disabled: 0 },
+      coach: { total: 0, active: 0, disabled: 0 },
+      admin: { total: 0, active: 0, disabled: 0 },
+    };
+    for (const user of users) {
+      const group = roles[user.role];
+      group.total += 1;
+      if ((user.status ?? "active") === "active") group.active += 1;
+      else group.disabled += 1;
+    }
+    const recentAuditActorIds = recentAudit.flatMap((entry) => entry.actorId ? [entry.actorId] : []);
+    const actors = recentAuditActorIds.length
+      ? await db.collection<UserDocument>("users").find({ _id: { $in: recentAuditActorIds } }).toArray()
+      : [];
+    const actorEmails = new Map(actors.map((user) => [user._id.toHexString(), user.email]));
+    res.status(200).json({
+      success: true,
+      data: {
+        usersByRole: roles,
+        registrations: {
+          last7Days: registrations(7),
+          last30Days: registrations(30),
+          dailyTrend: days.map((day) => ({
+            date: day,
+            count: users.filter((user) => user.createdAt.toISOString().slice(0, 10) === day).length,
+          })),
+        },
+        reviewQueue: {
+          pending: queue.filter((item) => item.status === "pending_review").length,
+          inReview: queue.filter((item) => item.status === "in_review").length,
+          oldestWaitingAt: oldest?.createdAt.toISOString() ?? null,
+          completedThisWeek: completedThisWeek.length,
+          averageTurnaroundMinutes: turnaround.length
+            ? Math.round(turnaround.reduce((sum, value) => sum + value, 0) / turnaround.length)
+            : null,
+        },
+        contentCounts: { cvs: resumes.length, jobs: jobs.length, matches: matches.length },
+        recentAudit: recentAudit.map((entry) => ({
+          id: entry._id.toHexString(),
+          actorEmail: entry.actorId ? actorEmails.get(entry.actorId.toHexString()) ?? null : null,
+          action: entry.action,
+          createdAt: entry.createdAt.toISOString(),
+        })),
+      },
+    });
+  }),
+);
 
 adminRouter.get(
   "/users",

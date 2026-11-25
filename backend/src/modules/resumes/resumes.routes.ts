@@ -93,7 +93,7 @@ export function toResumeResponse(
     ...(resume.parseJobId ? { parseJobId: resume.parseJobId.toHexString() } : {}),
     ...(resume.title === undefined ? {} : { title: resume.title }),
     ...(resume.notes === undefined ? {} : { notes: resume.notes }),
-    ...(includeText ? { extractedText: resume.extractedText } : {}),
+    ...(includeText ? { extractedText: resume.extractedText, structuredCv: resume.structuredCv } : {}),
     ...(parsedData ? { parsedData } : {}),
     createdAt: resume.createdAt.toISOString(),
     updatedAt: resume.updatedAt.toISOString(),

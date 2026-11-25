@@ -76,9 +76,9 @@ Retention: remove source file and metadata on user deletion or configured expiry
 
 ### `resume_vector_chunks`
 
-Anonymized resume excerpts and Mistral vectors used for semantic evidence retrieval.
+Original resume excerpts and Mistral vectors used for semantic evidence retrieval. Original chunk text is retained for retrieval and owner-facing evidence; only the embedding request payload is sanitized for the four configured PII types.
 
-Implemented fields: `_id:ObjectId`; `ownerId:ObjectId`; `resumeId:ObjectId`; `chunkIndex:number`; `content:string` (Presidio-processed text only); `embedding:number[]` (1024 dimensions for `mistral-embed`); `embeddingModel:string`; `createdAt:Date`; `updatedAt:Date`.
+Implemented fields: `_id:ObjectId`; `ownerId:ObjectId`; `resumeId:ObjectId`; `chunkIndex:number`; `content:string` (original extracted resume text); `embedding:number[]` (1024 dimensions for `mistral-embed`, generated from four-PII-sanitized text); `embeddingModel:string`; `createdAt:Date`; `updatedAt:Date`.
 
 The JSON adapter enforces unique `{ownerId:1,resumeId:1,chunkIndex:1}` and ranks the selected owner's resume chunks in-process using cosine similarity over the stored vectors. MongoDB Atlas Vector Search is a possible future replacement.
 

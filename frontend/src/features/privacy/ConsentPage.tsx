@@ -2,19 +2,20 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 interface ConsentPageProps {
-  onAgree: () => Promise<void>;
+  onAgree: (humanReview: boolean) => Promise<void>;
 }
 
 export default function ConsentPage({ onAgree }: ConsentPageProps) {
   const [resumeChecked, setResumeChecked] = useState(false);
   const [externalModelChecked, setExternalModelChecked] = useState(false);
+  const [humanReviewChecked, setHumanReviewChecked] = useState(false);
   const [declined, setDeclined] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function acceptConsent() {
     setSubmitting(true);
     try {
-      await onAgree();
+      await onAgree(humanReviewChecked);
     } finally {
       setSubmitting(false);
     }
@@ -76,6 +77,21 @@ export default function ConsentPage({ onAgree }: ConsentPageProps) {
         />
         <span>
           I separately agree that only the CV text returned by the local Presidio service may be sent to external AI providers for analysis and matching. I understand that Presidio may not detect every personal detail.
+        </span>
+      </label>
+
+      <label className="consent-check" htmlFor="human-review-consent-checkbox">
+        <input
+          id="human-review-consent-checkbox"
+          type="checkbox"
+          checked={humanReviewChecked}
+          onChange={(event) => {
+            setHumanReviewChecked(event.currentTarget.checked);
+            setDeclined(false);
+          }}
+        />
+        <span>
+          I optionally agree that an authorized coach may review the CV, relevant job description, and AI output for a flagged item or when I request help. Coaches can access this information only through an eligible review.
         </span>
       </label>
 

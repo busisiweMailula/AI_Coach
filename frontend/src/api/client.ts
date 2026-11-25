@@ -69,11 +69,22 @@ export interface ReviewItem {
   targetId: string;
   flags: string[];
   riskLevel: "low" | "medium" | "high";
-  status: "pending_review" | "in_review" | "approved" | "edited" | "rejected";
+  status: "pending_review" | "in_review" | "approved" | "edited" | "rejected" | "withdrawn";
   assignedCoachId: string | null;
+  claimedAt?: string | null;
   requestReason: string | null;
   decisionReason: string | null;
   decisionText: string | null;
+  modifiedOutput?: string | null;
+  recommendations?: string[];
+  decidedBy?: string | null;
+  decidedAt?: string | null;
+  internalNote?: string | null;
+  candidate?: { displayName: string; email: string };
+  jobTitle?: string | null;
+  resumeName?: string | null;
+  flagReasons?: string[];
+  waitingSeconds?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -85,6 +96,9 @@ export type CoachReviewTarget =
       scoreBreakdown: Record<string, number>;
       skillResults: Array<{ name: string; status: string; evidenceSnippet?: string }>;
       disclaimer: string;
+      flags: string[];
+      confidence: number;
+      reviewedOutput?: string;
     }
   | {
       type: "resume_suggestion";
@@ -92,6 +106,8 @@ export type CoachReviewTarget =
       proposedText: string;
       reason: string;
       sourceSnippet: string;
+      jobRequirement?: string;
+      reviewedOutput?: string;
     }
   | {
       type: "interview_evaluation";
@@ -102,11 +118,65 @@ export type CoachReviewTarget =
       exampleAnswer: string | null;
       confidence: number;
       answers: Array<{ question: string; answer: string }>;
+      reviewedOutput?: string;
     };
 
 export interface CoachReviewDetails {
   review: ReviewItem;
   target: CoachReviewTarget;
+  candidate: { id: string; displayName: string; email: string; registeredAt: string };
+  job: { title: string; company: string | null; text: string; createdAt: string } | null;
+  resume: {
+    id: string;
+    fileName: string;
+    title: string | null;
+    createdAt: string;
+    extractedText: string;
+    structuredCv: StructuredCv | null;
+    fileLink: string;
+  } | null;
+  history: Array<{ action: string; actor: string; createdAt: string; details: string | null }>;
+}
+
+export interface CandidateCoachFeedback {
+  review: ReviewItem;
+  coachName: string;
+  decisionLabel: "Approved" | "Modified" | "Rejected";
+  reason: string | null;
+  recommendations: string[];
+  originalOutput: string | null;
+  modifiedOutput: string | null;
+  target: CoachReviewTarget;
+}
+
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  link: string;
+  entityType: string;
+  entityId: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface AdminDashboard {
+  usersByRole: Record<UserRole, { total: number; active: number; disabled: number }>;
+  registrations: {
+    last7Days: number;
+    last30Days: number;
+    dailyTrend: Array<{ date: string; count: number }>;
+  };
+  reviewQueue: {
+    pending: number;
+    inReview: number;
+    oldestWaitingAt: string | null;
+    completedThisWeek: number;
+    averageTurnaroundMinutes: number | null;
+  };
+  contentCounts: { cvs: number; jobs: number; matches: number };
+  recentAudit: Array<{ id: string; actorEmail: string | null; action: string; createdAt: string }>;
 }
 
 export interface ConsentStatus {
@@ -115,7 +185,7 @@ export interface ConsentStatus {
   accepted: boolean;
 }
 
-export type ConsentPurpose = "resume_processing" | "external_model_processing";
+export type ConsentPurpose = "resume_processing" | "external_model_processing" | "human_review";
 
 export interface ResumeUploadResponse {
   resume: {
@@ -141,6 +211,77 @@ export interface Resume {
   parsedData?: unknown;
   createdAt: string;
   updatedAt: string;
+}
+
+export type ResumeSectionType =
+  | "summary" | "core_competencies" | "technical_skills" | "experience" | "projects"
+  | "education" | "certifications" | "additional_information" | "references" | "custom";
+
+export interface StructuredCvLine {
+  id: string;
+  text: string;
+  kind: "paragraph" | "bullet" | "date";
+  bold?: boolean;
+}
+
+export interface StructuredCvSection {
+  id: string;
+  type: ResumeSectionType;
+  subtype?: string;
+  heading: string;
+  paragraphs: StructuredCvLine[];
+  groups: Array<{ id: string; sourceLineId: string; label: string; value: string }>;
+  entries: Array<{
+    id: string;
+    title: string;
+    dates: string;
+    company: string;
+    location: string;
+    lines: StructuredCvLine[];
+  }>;
+}
+
+export interface StructuredCv {
+  header: {
+    name: string;
+    headline: string;
+    phone: string;
+    email: string;
+    location: string;
+    links: string[];
+    sourceLines: StructuredCvLine[];
+  };
+  sections: StructuredCvSection[];
+  lossless: { coverage: number; verified: boolean };
+}
+
+export interface ResumeSuggestionTarget {
+  sectionType: ResumeSectionType;
+  sectionSubtype?: string;
+  entryId?: string;
+  bulletId?: string;
+  field: "text" | "title" | "company" | "location" | "dates" | "objective" | "technologies" | "contribution" | "outcome";
+  operation: "replace";
+  before: string;
+  after: string;
+}
+
+export interface DraftSuggestion {
+  id: string;
+  originalText: string;
+  proposedText: string;
+  target: ResumeSuggestionTarget | null;
+  sectionTitle?: string;
+  locationLabel?: string;
+  applicationStatus?: "applied" | "conflict" | "needs_input" | "stale" | "not_applied";
+}
+
+export interface ResumeDraftResponse {
+  resumeId: string;
+  jobDescriptionId: string | null;
+  structuredCv: StructuredCv;
+  acceptedSuggestions: DraftSuggestion[];
+  suggestions: ResumeSuggestion[];
 }
 
 export interface JobDescription {
@@ -181,6 +322,7 @@ export interface MatchResult {
   disclaimer: string;
   scoreConfigVersion: string;
   reviewStatus: string;
+  reviewedOutput?: string | null;
   flags: string[];
   createdAt: string;
 }
@@ -203,8 +345,20 @@ export interface ResumeSuggestion {
   proposedText: string;
   reason: string;
   sourceSnippet: string;
+  sectionId: string | null;
+  entryId: string | null;
+  bulletId: string | null;
+  field: "text" | "title" | "company" | "location" | "dates" | null;
+  operation: "replace" | "add" | "remove" | null;
+  sectionTitle: string | null;
+  locationLabel: string | null;
+  jobRequirement: string | null;
+  needsUserInput: string | null;
+  userInput: string | null;
+  applicationStatus: "applied" | "conflict" | "needs_input" | "stale" | "not_applied";
   status: "pending" | "accepted" | "rejected";
   reviewStatus: string;
+  reviewedOutput?: string | null;
   flags: string[];
   createdAt: string;
   updatedAt: string;
@@ -247,6 +401,7 @@ export interface InterviewEvaluation {
   exampleAnswer: string | null;
   confidence: number;
   reviewStatus: string;
+  reviewedOutput?: string | null;
 }
 
 export interface JobStatus {
@@ -348,9 +503,28 @@ export function getResumeDraft(
   token: string,
   resumeId: string,
   jobDescriptionId: string,
-): Promise<{ resumeId: string; jobDescriptionId: string; content: string; appliedSuggestionIds: string[] }> {
+): Promise<ResumeDraftResponse> {
   const query = new URLSearchParams({ jobDescriptionId });
   return request(`/api/v1/resumes/${encodeURIComponent(resumeId)}/draft?${query}`, { token });
+}
+
+export function getResumePreview(token: string, resumeId: string): Promise<ResumeDraftResponse> {
+  return request(`/api/v1/resumes/${encodeURIComponent(resumeId)}/cv/preview`, { token });
+}
+
+export async function downloadResumeCv(token: string, resumeId: string): Promise<Blob> {
+  const response = await fetch(`/api/v1/resumes/${encodeURIComponent(resumeId)}/cv/download`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as ApiErrorPayload | null;
+    throw new ApiError(
+      payload?.error?.message ?? "The CV download could not be completed.",
+      response.status,
+      payload?.error?.code,
+    );
+  }
+  return response.blob();
 }
 
 export function updateResume(
@@ -445,11 +619,12 @@ export function decideSuggestion(
   token: string,
   suggestionId: string,
   decision: "accept" | "reject",
+  input: { proposedText?: string; userInput?: string } = {},
 ): Promise<ResumeSuggestion> {
   return request(`/api/v1/suggestions/${encodeURIComponent(suggestionId)}/decision`, {
     token,
     method: "POST",
-    body: JSON.stringify({ decision }),
+    body: JSON.stringify({ decision, ...input }),
   });
 }
 
@@ -522,8 +697,14 @@ export function getInterviewResults(
   return request(`/api/v1/interviews/${encodeURIComponent(sessionId)}/results`, { token });
 }
 
-export function getPendingReviews(token: string): Promise<{ items: ReviewItem[]; nextCursor: string | null }> {
-  return request("/api/v1/reviews/pending", { token });
+export function getPendingReviews(token: string, query: {
+  search?: string; type?: string; risk?: string; sort?: string; page?: number; pageSize?: number;
+} = {}): Promise<{ items: ReviewItem[]; total: number; page: number; pageSize: number; nextPage: number | null }> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  return request(`/api/v1/reviews/pending?${params}`, { token });
 }
 
 export function getCoachReviewDetails(token: string, reviewId: string): Promise<CoachReviewDetails> {
@@ -533,19 +714,236 @@ export function getCoachReviewDetails(token: string, reviewId: string): Promise<
 export function decideReview(
   token: string,
   reviewId: string,
-  decision: "approve" | "edit" | "reject",
+  decision: "approve" | "modify" | "reject",
   reason: string,
-  editedText?: string,
+  options: { modifiedOutput?: string; recommendations?: string[]; internalNote?: string } = {},
 ): Promise<ReviewItem> {
   return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}/decision`, {
     token,
     method: "POST",
-    body: JSON.stringify({ decision, reason, editedText }),
+    body: JSON.stringify({ decision, reason, ...options }),
   });
+}
+
+export function claimReview(token: string, reviewId: string): Promise<ReviewItem> {
+  return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}/claim`, { token, method: "POST" });
+}
+
+export function releaseReview(token: string, reviewId: string): Promise<ReviewItem> {
+  return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}/release`, { token, method: "POST" });
+}
+
+export interface CoachDashboardStats {
+  pending: number;
+  inReviewByMe: number;
+  completedToday: number;
+  completedThisWeek: number;
+  avgTurnaroundMinutes: number | null;
+  oldestWaitingAt: string | null;
+  oldestWaitingMinutes: number | null;
+  byRisk: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+  byType: {
+    job_match: number;
+    resume_suggestion: number;
+    interview_evaluation: number;
+  };
+}
+
+export interface NextReviewItem {
+  id: string;
+  accountName: string;
+  accountEmail: string;
+  jobTitle: string | null;
+  cvName: string | null;
+  reviewType: "job_match" | "resume_suggestion" | "interview_evaluation";
+  reviewTypeLabel: string;
+  riskLevel: "low" | "medium" | "high";
+  flagReason: string;
+  flagReasons: string[];
+  waitingTime: string;
+  waitingSeconds: number;
+  createdAt: string;
+}
+
+export interface DashboardQueueItem {
+  id: string;
+  accountName: string;
+  accountEmail: string;
+  jobTitle: string | null;
+  cvName: string | null;
+  reviewType: "job_match" | "resume_suggestion" | "interview_evaluation";
+  reviewTypeLabel: string;
+  riskLevel: "low" | "medium" | "high";
+  flagReason: string;
+  flagReasons: string[];
+  waitingTime: string;
+  waitingSeconds: number;
+  createdAt: string;
+  status: string;
+  assignedCoachId: string | null;
+}
+
+export interface CoachDashboardPayload {
+  stats: CoachDashboardStats;
+  nextReview: NextReviewItem | null;
+  queue: {
+    items: DashboardQueueItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    nextPage: number | null;
+  };
+  pending: number;
+  inReviewByMe: number;
+  completedToday: number;
+  completedThisWeek: number;
+  avgTurnaroundMinutes: number | null;
+  oldestWaitingAt: string | null;
+  oldestWaitingId: string | null;
+  byType: Record<string, number>;
+  byRisk: Record<string, number>;
+  nextInQueueId: string | null;
+  recentDecisions: ReviewItem[];
+}
+
+export interface ReviewSummaryData {
+  reviewId: string;
+  status: string;
+  account: {
+    name: string;
+    email: string;
+    registeredDate: string;
+    reviewType: "job_match" | "resume_suggestion" | "interview_evaluation";
+    reviewTypeLabel: string;
+    riskLevel: "low" | "medium" | "high";
+    flagReason: string;
+    flagReasons: string[];
+    waitingTime: string;
+    waitingSeconds: number;
+    createdAt: string;
+  };
+  cv: {
+    id: string | null;
+    fileName: string;
+    title: string | null;
+    uploadDate: string | null;
+    headline: string | null;
+    mostRecentRole: {
+      title: string;
+      company: string;
+    } | null;
+    roleCount: number;
+    topSkills: string[];
+    highestEducation: {
+      degree: string;
+      institution: string;
+    } | null;
+    detectedSections: string[];
+  } | null;
+  job: {
+    id: string | null;
+    title: string;
+    company: string | null;
+    location: string | null;
+    topSkills: string[];
+    dateAdded: string | null;
+  } | null;
+}
+
+export function getCoachDashboard(token: string): Promise<CoachDashboardPayload> {
+  return request("/api/v1/coach/dashboard", { token });
+}
+
+export function getCoachDashboardData(
+  token: string,
+  options: {
+    search?: string;
+    type?: string;
+    risk?: string;
+    sort?: "oldest" | "highest_risk";
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<CoachDashboardPayload> {
+  const params = new URLSearchParams();
+  if (options.search) params.set("search", options.search);
+  if (options.type) params.set("type", options.type);
+  if (options.risk) params.set("risk", options.risk);
+  if (options.sort) params.set("sort", options.sort);
+  if (options.page) params.set("page", String(options.page));
+  if (options.pageSize) params.set("pageSize", String(options.pageSize));
+  const qs = params.toString();
+  return request(`/api/v1/coach/dashboard${qs ? `?${qs}` : ""}`, { token });
+}
+
+export function getReviewSummary(token: string, reviewId: string): Promise<ReviewSummaryData> {
+  return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}/summary`, { token });
+}
+
+export function recordReviewDrawerViewAudit(
+  token: string,
+  reviewId: string,
+  view: "cv" | "job_description",
+): Promise<{ success: boolean }> {
+  return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}/audit-view`, {
+    token,
+    method: "POST",
+    body: JSON.stringify({ view }),
+  });
+}
+
+export function getCandidateFeedback(token: string): Promise<{ items: ReviewItem[] }> {
+  return request("/api/v1/reviews/feedback", { token });
+}
+
+export function getCandidateFeedbackDetails(token: string, reviewId: string): Promise<CandidateCoachFeedback> {
+  return request(`/api/v1/reviews/feedback/${encodeURIComponent(reviewId)}`, { token });
+}
+
+export async function getReviewResumeFile(token: string, reviewId: string): Promise<Blob> {
+  const response = await fetch(`/api/v1/reviews/${encodeURIComponent(reviewId)}/resume-file`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as ApiEnvelope<unknown> & ApiErrorPayload | null;
+    throw new ApiError(payload?.error?.message ?? "The original CV could not be opened.", response.status, payload?.error?.code);
+  }
+  return response.blob();
+}
+
+export function getNotifications(token: string, options: {
+  limit?: number; cursor?: string; unreadOnly?: boolean;
+} = {}): Promise<{ items: NotificationItem[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.cursor) params.set("cursor", options.cursor);
+  if (options.unreadOnly !== undefined) params.set("unreadOnly", String(options.unreadOnly));
+  return request(`/api/v1/notifications?${params}`, { token });
+}
+
+export function getNotificationUnreadCount(token: string): Promise<{ count: number }> {
+  return request("/api/v1/notifications/unread-count", { token });
+}
+
+export function markNotificationRead(token: string, id: string): Promise<NotificationItem> {
+  return request(`/api/v1/notifications/${encodeURIComponent(id)}/read`, { token, method: "PATCH" });
+}
+
+export function markAllNotificationsRead(token: string): Promise<{ modifiedCount: number }> {
+  return request("/api/v1/notifications/read-all", { token, method: "POST" });
 }
 
 export function getAdminUsers(token: string): Promise<{ users: AdminUser[] }> {
   return request("/api/v1/admin/users", { token });
+}
+
+export function getAdminDashboard(token: string): Promise<AdminDashboard> {
+  return request("/api/v1/admin/dashboard", { token });
 }
 
 export function registerCoach(

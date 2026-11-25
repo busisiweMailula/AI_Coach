@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { ObjectId } from "mongodb";
+import { ValidationError } from "../../common/errors.js";
 import type { AsyncJobDocument } from "../../infra/jobs/job.model.js";
 import { getDb } from "../../infra/db/database.js";
 import { env } from "../../config/env.js";
@@ -9,6 +10,7 @@ import { logger } from "../../config/logger.js";
 import { extractDocument } from "../../infra/files/document-extractor.js";
 import { LocalFileStorage } from "../../infra/storage/local-file-storage.js";
 import type { ResumeDocument, ResumeMetadataUpdate } from "./resume.model.js";
+import { structureCv, type StructuredCv } from "./structured-cv.js";
 import { deleteResume, findParsedResumeData, findResume, insertResume, listResumes, updateResume } from "./resumes.repository.js";
 
 const storage = new LocalFileStorage();
@@ -41,6 +43,7 @@ export async function uploadResume(input: {
     sha256: createHash("sha256").update(input.buffer).digest("hex"),
     storageKey,
     extractedText: extracted.text,
+    structuredCv: structureCv(extracted.sourceLines),
     textExtractionStatus: extracted.text ? "extracted" : "empty",
     parseStatus: parseJobId ? "queued" : "uploaded",
     ...(parseJobId ? { parseJobId } : {}),
@@ -86,6 +89,38 @@ export async function uploadResume(input: {
 
 export async function getResume(resumeId: string, ownerId: string): Promise<ResumeDocument> {
   return findResume(resumeId, new ObjectId(ownerId));
+}
+
+export async function getOriginalResumeFile(resume: ResumeDocument): Promise<Buffer> {
+  return storage.get(resume.storageKey);
+}
+
+export async function ensureResumeStructuredCv(resume: ResumeDocument): Promise<StructuredCv> {
+  if (resume.structuredCv) {
+    if (!resume.structuredCv.lossless.verified) {
+      throw new ValidationError("The CV structure could not be verified against its source text");
+    }
+    return resume.structuredCv;
+  }
+  const buffer = await getOriginalResumeFile(resume);
+  const extracted = await extractDocument(
+    buffer,
+    resume.originalFileName,
+    resume.contentType,
+    ["pdf", "docx"],
+  );
+  if (extracted.text !== resume.extractedText) {
+    throw new ValidationError("The stored resume text no longer matches its original file");
+  }
+  const structuredCv = structureCv(extracted.sourceLines);
+  if (!structuredCv.lossless.verified) {
+    throw new ValidationError("The CV structure could not be verified against its source file");
+  }
+  await getDb().collection<ResumeDocument>("resumes").updateOne(
+    { _id: resume._id, ownerId: resume.ownerId, structuredCv: { $exists: false } },
+    { $set: { structuredCv, updatedAt: new Date() } },
+  );
+  return structuredCv;
 }
 
 export async function getResumes(ownerId: string): Promise<ResumeDocument[]> {

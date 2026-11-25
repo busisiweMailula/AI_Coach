@@ -15,8 +15,10 @@ import { jobsRouter } from "./modules/jobs/jobs.routes.js";
 import { privacyRouter } from "./modules/privacy/privacy.routes.js";
 import { resumesRouter } from "./modules/resumes/resumes.routes.js";
 import { reviewsRouter } from "./modules/reviews/reviews.routes.js";
+import { coachRouter } from "./modules/reviews/coach.routes.js";
 import { usersRouter } from "./modules/users/users.routes.js";
 import { workflowsRouter } from "./modules/workflows/workflows.routes.js";
+import { notificationsRouter } from "./modules/notifications/notifications.routes.js";
 
 export function createApp() {
   const app = express();
@@ -40,6 +42,8 @@ export function createApp() {
   app.use("/api/v1", workflowsRouter);
   app.use("/api/v1", interviewsRouter);
   app.use("/api/v1/reviews", reviewsRouter);
+  app.use("/api/v1/coach", coachRouter);
+  app.use("/api/v1/notifications", notificationsRouter);
 
   app.use((_req, res) => {
     res.status(404).json({

@@ -10,32 +10,44 @@ import { getLlmProvider } from "../../infra/llm/provider-factory.js";
 import { LlmProviderError } from "../../infra/llm/llm-provider.js";
 import { getDb } from "../../infra/db/database.js";
 import { ensureExternalModelConsent, ensureResumeConsent } from "../../modules/privacy/privacy.service.js";
+import { sanitizeForLlm } from "../../modules/privacy/resume-anonymizer.js";
 
 const promptUrl = new URL("../../../prompts/v1/agent-system.md", import.meta.url);
 let systemPrompt: string | undefined;
 
-export interface AgentRunResult<T> {
+export interface AgentRunResult<T, I> {
   value: T;
+  sanitizedInput: I;
   executionId: ObjectId;
   attempts: number;
 }
 
-export async function runAgent<T>(input: {
+export async function runAgent<T, I>(input: {
   ownerId: ObjectId;
   task: string;
   promptVersion: string;
-  input: unknown;
+  input: I;
   schema: ZodType<T>;
   instructions?: string;
   requiresResumeProcessingConsent?: boolean;
-}): Promise<AgentRunResult<T>> {
-  const provider = getLlmProvider();
+}): Promise<AgentRunResult<T, I>> {
   if (input.requiresResumeProcessingConsent) {
     await ensureResumeConsent(input.ownerId.toHexString());
   }
   await ensureExternalModelConsent(input.ownerId);
+  const rawInputJson = JSON.stringify(input.input);
+  if (!rawInputJson) throw new UpstreamServiceError("AI input could not be serialized");
+  const sanitizedInputJson = await sanitizeForLlm(rawInputJson);
+  let sanitizedInput: I;
+  try {
+    sanitizedInput = JSON.parse(sanitizedInputJson) as I;
+  } catch {
+    throw new UpstreamServiceError("Presidio returned invalid sanitized AI input");
+  }
+  const inputJson = JSON.stringify(sanitizedInput);
+  if (!inputJson) throw new UpstreamServiceError("Sanitized AI input could not be serialized");
+  const provider = getLlmProvider();
   const startedAt = Date.now();
-  const inputJson = JSON.stringify(input.input);
   const inputHash = createHash("sha256").update(inputJson).digest("hex");
   const executionId = new ObjectId();
   const primaryModel = env.LLM_PROVIDER === "groq" ? env.GROQ_MODEL : env.LLM_MODEL;
@@ -124,7 +136,7 @@ export async function runAgent<T>(input: {
     safeErrorCode: null,
     createdAt: new Date(),
   });
-  return { value: result, executionId, attempts };
+  return { value: result, sanitizedInput, executionId, attempts };
 }
 
 async function loadSystemPrompt(): Promise<string> {

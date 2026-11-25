@@ -6,6 +6,7 @@ import { authMiddleware, requireRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
 import { CONSENT_PURPOSES } from "./consent.model.js";
 import { getConsentStatus, listConsents, recordConsent } from "./privacy.service.js";
+import { withdrawPendingReviews } from "../reviews/reviews.service.js";
 
 const updateConsentSchema = z.object({
   purpose: z.enum(CONSENT_PURPOSES),
@@ -46,6 +47,9 @@ privacyRouter.put(
       ownerId: req.auth.userId,
       source: "settings",
     });
+    if (consent.purpose === "human_review" && !consent.granted) {
+      await withdrawPendingReviews(req.auth.userId);
+    }
     res.status(200).json({ success: true, data: toConsentResponse(consent) });
   }),
 );

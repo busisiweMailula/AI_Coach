@@ -295,6 +295,21 @@ function evaluationResponse(
   evaluation: InterviewEvaluationDocument,
   reviewStatus: InterviewSessionDocument["reviewStatus"],
 ) {
+  if (reviewStatus === "edited" || reviewStatus === "rejected") {
+    return {
+      rubricVersion: evaluation.rubricVersion,
+      scores: {},
+      dimensionFeedback: [],
+      overallScore: null,
+      strengths: [],
+      improvements: [],
+      exampleAnswer: null,
+      confidence: evaluation.confidence,
+      reviewStatus,
+      reviewedOutput: reviewStatus === "edited" ? evaluation.reviewedOutput ?? null : null,
+      ...(reviewStatus === "rejected" ? { withdrawn: true } : {}),
+    };
+  }
   return {
     rubricVersion: evaluation.rubricVersion,
     scores: Object.fromEntries(evaluation.dimensions.map((item) => [item.dimension, item.score])),
@@ -305,6 +320,7 @@ function evaluationResponse(
     exampleAnswer: evaluation.exampleAnswer,
     confidence: evaluation.confidence,
     reviewStatus,
+    reviewedOutput: evaluation.reviewedOutput ?? null,
   };
 }
 

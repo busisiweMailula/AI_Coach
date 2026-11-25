@@ -8,6 +8,8 @@ describe("Phase 5 guardrails", () => {
   it("requires evidence snippets to exist in the source text", () => {
     expect(evidenceExists("Built REST APIs with TypeScript", "REST APIs")).toBe(true);
     expect(evidenceExists("Built REST APIs with TypeScript", "managed a team of 10")).toBe(false);
+    expect(evidenceExists("Built REST-APIs for production.", "REST APIs")).toBe(true);
+    expect(evidenceExists("Built REST APIs for production.", "REST  APIs")).toBe(true);
   });
 
   it("blocks numeric claims that do not appear in the source", () => {

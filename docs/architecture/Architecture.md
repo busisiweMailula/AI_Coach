@@ -59,7 +59,7 @@ Dependencies point inward. Domain modules do not import Express, MongoDB, or pro
 - Every candidate-owned document has an `ownerId`; repository queries include it.
 - Uploaded files are private, size limited, MIME-sniffed, and stored outside a public web root.
 - External model calls are server-side, versioned, and subject to consent and provider data-processing review.
-- Resume text is anonymized by Presidio before Mistral embedding calls; retrieved evidence is filtered by candidate and resume IDs.
+- Original resume text and evidence are retained in the owner-scoped JSON store. A single `sanitizeForLlm` boundary sanitizes serialized inputs before every LLM call; Mistral receives only four-PII-sanitized chunks for embeddings, while stored vector-chunk content remains original for evidence retrieval and display.
 - AI output remains attributable to its source, prompt/config version, provider, and review state.
 
 ## Decisions still requiring confirmation

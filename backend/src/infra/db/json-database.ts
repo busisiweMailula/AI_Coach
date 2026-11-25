@@ -133,7 +133,15 @@ export class JsonDatabase {
   private async persist(): Promise<void> {
     const temporaryPath = `${this.filePath}.tmp`;
     await writeFile(temporaryPath, JSON.stringify(encodeValue(this.state), null, 2), "utf8");
-    await rename(temporaryPath, this.filePath);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await rename(temporaryPath, this.filePath);
+        return;
+      } catch (error) {
+        if (attempt === 4) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
   }
 }
 

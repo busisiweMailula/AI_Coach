@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import {
   ApiError,
   analyzeMatch,
   analyzeSkillGaps,
   answerInterview,
   decideSuggestion,
+  downloadResumeCv,
   evaluateInterview,
   generateQuestions,
   getCandidateProgress,
@@ -18,11 +20,11 @@ import {
   getMatch,
   getQuestionSet,
   getResume,
-  getResumeDraft,
+  getResumePreview,
   getResumes,
-  getResumeSuggestions,
   getSkillGaps,
   optimizeResume,
+  recordConsent,
   startInterview,
   submitJobDescription,
   updateResume,
@@ -37,10 +39,14 @@ import {
   type MatchResult,
   type Resume,
   type ResumeSuggestion,
+  type StructuredCv,
   type SkillGapResult,
 } from "../../api/client";
 import { useInterviewSpeech } from "./interview-speech";
 import { useInterviewRecognition } from "./interview-recognition";
+import CandidateFeedbackPage from "../reviews/CandidateFeedbackPage";
+import NotificationBell from "../notifications/NotificationBell";
+import NotificationCenter from "../notifications/NotificationCenter";
 
 interface Props {
   token: string;
@@ -50,18 +56,22 @@ interface Props {
   onSignOut: () => void;
 }
 
-type Tab = "dashboard" | "resume" | "jobs" | "match" | "studio" | "interview" | "privacy";
+type Tab = "dashboard" | "resume" | "jobs" | "match" | "studio" | "interview" | "feedback" | "notifications" | "privacy";
 
 const workspaceNavigation: Array<{ label: string; tabs: Tab[] }> = [
   { label: "Overview", tabs: ["dashboard"] },
   { label: "Resume & role", tabs: ["resume", "jobs"] },
   { label: "Match & coaching", tabs: ["match", "studio"] },
   { label: "Interview practice", tabs: ["interview"] },
+  { label: "Coach feedback", tabs: ["feedback"] },
+  { label: "Notifications", tabs: ["notifications"] },
   { label: "Privacy & settings", tabs: ["privacy"] },
 ];
 
 export default function CandidateWorkspace({ token, email, onWithdraw, onConsentRejected, onSignOut }: Props) {
   const [tab, setTab] = useState<Tab>("dashboard");
+  const location = useLocation();
+  const feedbackId = /^\/coach-feedback\/([^/]+)$/.exec(location.pathname)?.[1];
   const [progress, setProgress] = useState<CandidateProgress | null>(null);
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState("");
@@ -107,6 +117,11 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
 
   const activeSection = workspaceNavigation.find((item) => item.tabs.includes(tab))?.label ?? "Overview";
 
+  useEffect(() => {
+    if (location.pathname === "/coach-feedback" || feedbackId) setTab("feedback");
+    else if (location.pathname === "/notifications") setTab("notifications");
+  }, [location.pathname, feedbackId]);
+
   return (
     <div className="candidate-layout">
       <aside className="candidate-sidebar">
@@ -147,7 +162,7 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
       <div className="candidate-main-shell">
         <header className="candidate-topbar">
           <p>Workspace <span>/</span> {activeSection}</p>
-          <span className="private-session"><i /> Private session</span>
+          <div className="candidate-topbar-actions"><NotificationBell token={token} /><span className="private-session"><i /> Private session</span></div>
         </header>
         <main className="candidate-main">
           <div className="candidate-content">
@@ -222,6 +237,22 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
                       description="Build questions for a role, practise one answer at a time, and review actionable feedback."
                     />
                     <InterviewSection token={token} resumes={resumes} selectedResumeId={selectedResumeId} jobs={jobs} />
+                  </>
+                )}
+                {tab === "feedback" && (
+                  <>
+                    <WorkspacePageHeading
+                      eyebrow="Coach feedback"
+                      title="A human review of your preparation."
+                      description="Read your coach’s decision and recommendations for reviewed items."
+                    />
+                    <CandidateFeedbackPage token={token} reviewId={feedbackId} />
+                  </>
+                )}
+                {tab === "notifications" && (
+                  <>
+                    <WorkspacePageHeading eyebrow="Notifications" title="Stay up to date." description="Recent updates for your account and coach reviews." />
+                    <NotificationCenter token={token} />
                   </>
                 )}
                 {tab === "privacy" && (
@@ -350,6 +381,22 @@ function PrivacySettings({ token, onWithdraw }: { token: string; onWithdraw: () 
   const [consents, setConsents] = useState<ConsentStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [savingHumanReview, setSavingHumanReview] = useState(false);
+
+  async function setHumanReviewConsent(granted: boolean) {
+    setSavingHumanReview(true);
+    setError("");
+    try {
+      await recordConsent(token, "human_review", granted);
+      setConsents((current) => current.map((item) => item.purpose === "human_review"
+        ? { ...item, accepted: granted }
+        : item));
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setSavingHumanReview(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -383,6 +430,16 @@ function PrivacySettings({ token, onWithdraw }: { token: string; onWithdraw: () 
         <button className="secondary" type="button" disabled={loading || Boolean(error)} onClick={() => void onWithdraw()}>
           Withdraw CV processing consent
         </button>
+        <button
+          className="secondary"
+          type="button"
+          disabled={loading || savingHumanReview || Boolean(error)}
+          onClick={() => void setHumanReviewConsent(!consents.find((item) => item.purpose === "human_review")?.accepted)}
+        >
+          {savingHumanReview ? "Saving…" : consents.find((item) => item.purpose === "human_review")?.accepted
+            ? "Withdraw human-review consent"
+            : "Allow coach review"}
+        </button>
       </section>
       <section className="workspace-panel privacy-info-panel">
         <p className="eyebrow">Your data</p>
@@ -395,6 +452,7 @@ function PrivacySettings({ token, onWithdraw }: { token: string; onWithdraw: () 
 }
 
 function consentPurposeLabel(purpose: string) {
+  if (purpose === "human_review") return "Human coach review";
   if (purpose === "resume_processing") return "CV processing";
   if (purpose === "external_model_processing") return "External AI processing";
   return purpose.replaceAll("_", " ");
@@ -640,6 +698,8 @@ function MatchSection({ token, resumes, selectedResumeId, jobs }: {
       {match && (
         <section className="result-section">
           <h2>Indicative match: {match.score}%</h2>
+          {isCoachReviewed(match.reviewStatus) && <p className="reviewed-indicator">Reviewed by a coach</p>}
+          {match.reviewedOutput && <p className="feedback-output">{match.reviewedOutput}</p>}
           <p>{match.disclaimer}</p>
           <div className="score-grid">{Object.entries(match.scoreBreakdown).map(([name, score]) =>
             <div key={name}><span>{name}</span><strong>{score}%</strong></div>)}</div>
@@ -675,17 +735,48 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
 }) {
   const [jobId, setJobId] = useState(jobs[0]?.id ?? "");
   const [suggestions, setSuggestions] = useState<ResumeSuggestion[]>([]);
-  const [generationComplete, setGenerationComplete] = useState(false);
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraft] = useState<StructuredCv | null>(null);
+  const [editedProposals, setEditedProposals] = useState<Record<string, string>>({});
+  const [userInputs, setUserInputs] = useState<Record<string, string>>({});
+  const [sectionFilter, setSectionFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
 
+  async function refreshPreview() {
+    if (!selectedResumeId) {
+      setDraft(null);
+      setSuggestions([]);
+      return;
+    }
+    const result = await getResumePreview(token, selectedResumeId);
+    setDraft(result.structuredCv);
+    setSuggestions(result.suggestions);
+  }
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedResumeId) {
+      setDraft(null);
+      setSuggestions([]);
+      return () => { active = false; };
+    }
+    setBusy(true);
+    void getResumePreview(token, selectedResumeId).then((result) => {
+      if (!active) return;
+      setDraft(result.structuredCv);
+      setSuggestions(result.suggestions);
+      setNotice(null);
+    }).catch((error: unknown) => {
+      if (active) setNotice({ text: errorMessage(error), error: true });
+    }).finally(() => {
+      if (active) setBusy(false);
+    });
+    return () => { active = false; };
+  }, [token, selectedResumeId]);
+
   async function generate() {
-    setSuggestions([]);
-    setDraft(null);
-    setGenerationComplete(false);
     setNotice(null);
     if (!selectedResumeId || !jobId) {
       setNotice({ text: "Select a CV in Resume & role and choose a job description.", error: true });
@@ -693,25 +784,10 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
     }
     setBusy(true);
     try {
-      const previous = await getResumeSuggestions(token);
-      const previousIds = new Set(previous.items
-        .filter((item) => item.resumeId === selectedResumeId && item.jobDescriptionId === jobId)
-        .map((item) => item.id));
       const accepted = await optimizeResume(token, selectedResumeId, jobId);
       await waitForJob(token, accepted.jobId);
-      const result = await getResumeSuggestions(token);
-      const generatedSuggestions = result.items.filter((item) =>
-        item.resumeId === selectedResumeId &&
-        item.jobDescriptionId === jobId &&
-        !previousIds.has(item.id));
-      setSuggestions(generatedSuggestions);
-      setGenerationComplete(true);
-      setNotice({
-        text: generatedSuggestions.length > 0
-          ? "New resume suggestions are ready for review."
-          : "No new suggestions were generated for this CV and job.",
-        error: false,
-      });
+      await refreshPreview();
+      setNotice({ text: "Resume suggestions are ready for review.", error: false });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
     } finally {
@@ -719,35 +795,18 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
     }
   }
 
-  async function decide(id: string, decision: "accept" | "reject") {
+  async function decide(suggestion: ResumeSuggestion, decision: "accept" | "reject") {
     setBusy(true);
     setNotice(null);
     try {
-      const updated = await decideSuggestion(token, id, decision);
-      setSuggestions((current) => current.map((item) => item.id === id ? updated : item));
-      setDraft(null);
-      setNotice({ text: `Suggestion ${decision === "accept" ? "accepted" : "rejected"}.`, error: false });
-    } catch (error) {
-      setNotice({ text: errorMessage(error), error: true });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function generateDraft() {
-    if (!selectedResumeId || !jobId) {
-      setNotice({ text: "Select a CV in Resume & role and choose a job description.", error: true });
-      return;
-    }
-    setBusy(true);
-    setNotice(null);
-    try {
-      const result = await getResumeDraft(token, selectedResumeId, jobId);
-      setDraft(result.content);
-      setNotice({
-        text: `${result.appliedSuggestionIds.length} accepted suggestion${result.appliedSuggestionIds.length === 1 ? "" : "s"} applied to the CV draft.`,
-        error: false,
+      await decideSuggestion(token, suggestion.id, decision, {
+        ...(decision === "accept" ? {
+          proposedText: editedProposals[suggestion.id] ?? suggestion.proposedText,
+          ...(userInputs[suggestion.id]?.trim() ? { userInput: userInputs[suggestion.id] } : {}),
+        } : {}),
       });
+      await refreshPreview();
+      setNotice({ text: `Suggestion ${decision === "accept" ? "accepted" : "rejected"}; CV preview updated.`, error: false });
     } catch (error) {
       setNotice({ text: errorMessage(error), error: true });
     } finally {
@@ -756,18 +815,17 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
   }
 
   async function downloadDraft() {
-    if (draft === null) return;
+    if (!selectedResumeId) return;
     const baseName = (selectedResume?.title || selectedResume?.originalFileName || "resume")
       .replace(/\.[^.]+$/, "")
       .replace(/[^\w.-]+/g, "_");
     setDownloading(true);
     try {
-      const { createResumeWordDocument } = await import("./resume-document");
-      const documentBlob = await createResumeWordDocument(draft);
+      const documentBlob = await downloadResumeCv(token, selectedResumeId);
       const url = URL.createObjectURL(documentBlob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${baseName}-draft.docx`;
+      link.download = `${baseName}-updated.docx`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
@@ -777,8 +835,42 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
     }
   }
 
-  const visibleSuggestions = suggestions.filter((suggestion) =>
-    suggestion.resumeId === selectedResumeId && suggestion.jobDescriptionId === jobId);
+  const sectionName = (suggestion: ResumeSuggestion) => suggestion.sectionTitle?.trim() || "Unplaced";
+  const jobSuggestions = jobId
+    ? suggestions.filter((suggestion) => suggestion.jobDescriptionId === jobId)
+    : [];
+  const sectionCounts = new Map<string, number>();
+  for (const section of draft?.sections ?? []) {
+    sectionCounts.set(section.heading.trim(), 0);
+  }
+  for (const suggestion of jobSuggestions) {
+    const title = sectionName(suggestion);
+    sectionCounts.set(title, (sectionCounts.get(title) ?? 0) + 1);
+  }
+  const availableSectionNames = [...sectionCounts.keys()];
+  useEffect(() => {
+    if (sectionFilter && !availableSectionNames.includes(sectionFilter)) {
+      setSectionFilter("");
+    }
+  }, [jobId, sectionFilter, availableSectionNames.join("\u001f")]);
+
+  const visibleSuggestions = jobSuggestions
+    .filter((suggestion) => !sectionFilter || sectionName(suggestion) === sectionFilter)
+    .sort((left, right) => {
+      const leftIndex = draft?.sections.findIndex((section) => section.id === left.sectionId) ?? -1;
+      const rightIndex = draft?.sections.findIndex((section) => section.id === right.sectionId) ?? -1;
+      return leftIndex - rightIndex || left.createdAt.localeCompare(right.createdAt);
+    });
+  const acceptedCount = suggestions.filter((item) => item.status === "accepted").length;
+  const appliedCount = suggestions.filter((item) =>
+    item.status === "accepted" && item.applicationStatus === "applied").length;
+  const attentionCount = suggestions.filter((item) =>
+    item.applicationStatus === "needs_input" ||
+    item.applicationStatus === "conflict" ||
+    item.applicationStatus === "stale").length;
+  const updatedSections = new Set(suggestions
+    .filter((item) => item.status === "accepted" && item.applicationStatus === "applied" && item.sectionId)
+    .map((item) => item.sectionId));
 
   return (
     <div className="workspace-panel">
@@ -789,63 +881,118 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
       <div className="selector-grid">
         <label>Job description<select value={jobId} onChange={(event) => {
           setJobId(event.target.value);
-          setSuggestions([]);
-          setGenerationComplete(false);
-          setDraft(null);
+          setSectionFilter("");
           setNotice(null);
         }}>
           <option value="">Select job</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.roleTitle || `Job ${job.id.slice(-6)}`}</option>)}
         </select></label>
         <button className="primary" type="button" disabled={busy} onClick={() => void generate()}>{busy ? "Generating…" : "Generate suggestions"}</button>
       </div>
-      {notice && <p className={`notice${notice.error ? " error" : ""}`}>{notice.text}</p>}
-      {!generationComplete ? (
-        <p className="supporting-copy" role={busy ? "status" : undefined}>
-          {busy
-            ? "Generating suggestions for this CV and job…"
-            : notice?.error
-              ? "No suggestions were loaded. Fix the issue above and try again."
-              : "Suggestions appear here after you select Generate suggestions."}
-        </p>
-      ) : visibleSuggestions.length === 0 ? (
-        <p className="supporting-copy">No new suggestions were generated for this CV and job.</p>
+      {notice && <p className={`notice${notice.error ? " error" : ""}`} role="status" aria-live="polite">{notice.text}</p>}
+      <p className="notice" role="status" aria-live="polite">
+        {acceptedCount} accepted · {appliedCount} applied to your CV · {attentionCount} need attention
+      </p>
+      <div className="selector-grid">
+        <label>Filter by section<select value={sectionFilter} onChange={(event) => setSectionFilter(event.target.value)} aria-label="Filter suggestions by CV section">
+          <option value="">All sections</option>
+          {[...sectionCounts.entries()].map(([title, count]) => (
+            <option key={title} value={title}>{title} ({count})</option>
+          ))}
+        </select></label>
+        <button className="secondary" type="button" disabled={downloading || !selectedResumeId} onClick={() => void downloadDraft()}>
+          {downloading ? "Preparing Word document…" : "Download CV (.docx)"}
+        </button>
+      </div>
+      {attentionCount > 0 && <p className="supporting-copy">Some accepted suggestions need attention before they can be included in the downloaded CV.</p>}
+      {busy && <p className="supporting-copy" role="status">Loading or updating your CV…</p>}
+      {visibleSuggestions.length === 0 ? (
+        <p className="supporting-copy">{jobId ? "No suggestions for this CV and job yet." : "Choose a job description to review its suggestions."}</p>
       ) : (
         <div className="suggestion-list">
           {visibleSuggestions.map((suggestion) => (
             <article className="suggestion-card" key={suggestion.id}>
+              <h3 className="suggestion-location">{suggestion.locationLabel ?? suggestion.sectionTitle ?? "CV section"}</h3>
+              {isCoachReviewed(suggestion.reviewStatus) && <p className="reviewed-indicator">Reviewed by a coach</p>}
+              {suggestion.reviewedOutput && <p className="feedback-output">{suggestion.reviewedOutput}</p>}
               <div className="comparison">
                 <section><h3>Original</h3><blockquote>{suggestion.originalText}</blockquote></section>
-                <section><h3>Proposed</h3><blockquote>{suggestion.proposedText}</blockquote></section>
+                <section>
+                  <h3>Proposed</h3>
+                  <label htmlFor={`proposal-${suggestion.id}`} className="supporting-copy">Edit before accepting</label>
+                  <textarea
+                    id={`proposal-${suggestion.id}`}
+                    value={editedProposals[suggestion.id] ?? suggestion.proposedText}
+                    onChange={(event) => setEditedProposals((current) => ({ ...current, [suggestion.id]: event.target.value }))}
+                    rows={4}
+                  />
+                </section>
               </div>
               <p><strong>Reason:</strong> {suggestion.reason}</p>
-              <p className="supporting-copy">Status: {suggestion.status} · Review: {suggestion.reviewStatus}</p>
-              {suggestion.status === "pending" && (
-                <div className="actions">
-                  <button className="primary" type="button" disabled={busy} onClick={() => void decide(suggestion.id, "accept")}>Accept</button>
-                  <button className="secondary" type="button" disabled={busy} onClick={() => void decide(suggestion.id, "reject")}>Reject</button>
-                </div>
+              {suggestion.jobRequirement && <p><strong>Job requirement:</strong> {suggestion.jobRequirement}</p>}
+              <p className="supporting-copy">
+                {suggestion.operation === "remove"
+                  ? `Accepting removes this ${suggestion.field ?? "CV"} content.`
+                  : suggestion.sectionId && draft?.sections.find((section) => section.id === suggestion.sectionId)?.type === "summary"
+                    ? "Accepting replaces the whole Professional Summary."
+                    : suggestion.entryId
+                      ? "Accepting replaces this CV entry item."
+                      : "Accepting replaces this section item."}
+              </p>
+              {suggestion.needsUserInput && (
+                <label>Information needed before accepting
+                  <textarea
+                    value={userInputs[suggestion.id] ?? suggestion.userInput ?? ""}
+                    onChange={(event) => setUserInputs((current) => ({ ...current, [suggestion.id]: event.target.value }))}
+                    rows={2}
+                  />
+                </label>
               )}
+              <div className="actions">
+                <span className="status-chip">{suggestion.status === "pending" ? "Pending" : suggestion.status === "accepted" ? "Accepted" : "Rejected"}</span>
+                <span className="status-chip">{suggestion.applicationStatus}</span>
+                <button className="primary" type="button" disabled={busy || (Boolean(suggestion.needsUserInput) &&
+                  !userInputs[suggestion.id]?.trim() &&
+                  (editedProposals[suggestion.id] ?? suggestion.proposedText) === suggestion.proposedText)}
+                  onClick={() => void decide(suggestion, "accept")}>Accept</button>
+                <button className="secondary" type="button" disabled={busy} onClick={() => void decide(suggestion, "reject")}>Reject</button>
+              </div>
             </article>
           ))}
         </div>
       )}
       <section className="result-section">
-        <h3>CV draft</h3>
-        <p className="supporting-copy">
-          Only accepted suggestions are included. Download the editable Word document to complete or update fields, then export it to PDF from Word.
-          Accepted changes that cannot be safely matched to an exact CV passage are included in an “Accepted CV updates” section rather than discarded.
-        </p>
-        <div className="actions">
-          <button className="secondary" type="button" disabled={busy || !selectedResumeId || !jobId} onClick={() => void generateDraft()}>
-            {busy ? "Preparing…" : "Generate CV draft"}
-          </button>
-          {draft !== null && (
-            <button className="secondary" type="button" disabled={downloading} onClick={() => void downloadDraft()}>
-              {downloading ? "Preparing Word document…" : "Download editable Word CV"}
-            </button>
-          )}
-        </div>
-        {draft !== null && <pre className="source-preview">{draft}</pre>}
+        <h3>CV preview</h3>
+        {!draft ? <p className="supporting-copy" role="status">Select a CV to load its preview.</p> : (
+          <div aria-live="polite">
+            <p className="supporting-copy">This is the CV content included in the Word download.</p>
+            {draft.header.name.trim() && <h4 className="cv-preview-name">{draft.header.name}</h4>}
+            {[draft.header.headline, draft.header.phone, draft.header.email, draft.header.location, ...draft.header.links]
+              .filter((value) => value.trim()).length > 0 && (
+                <p className="cv-preview-contact">
+                  {[draft.header.headline, draft.header.phone, draft.header.email, draft.header.location, ...draft.header.links]
+                    .filter((value) => value.trim()).join(" | ")}
+                </p>
+              )}
+            {getCvHeaderExtras(draft.header).map((line, index) => <p key={`header-${index}`}>{line}</p>)}
+            {draft.sections.map((section) => (
+              <section className={`result-section${updatedSections.has(section.id) ? " updated" : ""}`} key={section.id}>
+                <h4>{section.heading}{updatedSections.has(section.id) ? " · Updated" : ""}</h4>
+                {(section.type === "technical_skills" || section.type === "core_competencies") && section.groups.length > 0
+                  ? section.groups.map((group) => (
+                      <p key={group.id}>{group.label ? <><strong>{group.label}: </strong></> : null}{group.value}</p>
+                    ))
+                  : section.entries.length > 0
+                    ? section.entries.map((entry) => (
+                        <div key={entry.id}>
+                          <p><strong>{[entry.title, entry.company, entry.location, entry.dates].filter(Boolean).join(" · ")}</strong></p>
+                          {entry.lines.map((line) => <p key={line.id}>{line.kind === "bullet" ? "• " : ""}{line.text}</p>)}
+                        </div>
+                      ))
+                    : section.paragraphs.map((line) => <p key={line.id}>{line.kind === "bullet" ? "• " : ""}{line.text}</p>)}
+              </section>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -1375,6 +1522,8 @@ function EvaluationReport({
           <p className="supporting-copy">
             AI confidence: {Math.round(evaluation.confidence * 100)}% · Review status: {evaluation.reviewStatus.replaceAll("_", " ")}
           </p>
+          {isCoachReviewed(evaluation.reviewStatus) && <p className="reviewed-indicator">Reviewed by a coach</p>}
+          {evaluation.reviewedOutput && <p className="feedback-output">{evaluation.reviewedOutput}</p>}
           <h3>Feedback by skill</h3>
           <div className="score-grid">
             {evaluation.dimensionFeedback.map((dimension) => (
@@ -1407,6 +1556,8 @@ async function waitForJob(token: string, jobId: string) {
     if (status.status === "failed") {
       throw new Error(status.error?.code === "SERVICE_UNAVAILABLE"
         ? "The required local service is unavailable."
+        : status.error?.code === "AI_SERVICE_ERROR"
+          ? "The AI service could not complete the job. Please try again."
         : "The background AI job failed. Please try again.");
     }
     await delay(1000);
@@ -1416,6 +1567,24 @@ async function waitForJob(token: string, jobId: string) {
 
 function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function getCvHeaderExtras(header: StructuredCv["header"]): string[] {
+  const known = new Set([
+    ...[header.headline, header.phone, header.email, header.location, ...header.links].map(normalizeHeaderValue),
+    ...(header.name.trim() ? [normalizeHeaderValue(header.name)] : []),
+  ]);
+  return header.sourceLines.flatMap((line) => line.text.split(/[|•·]/))
+    .map((value) => value.trim())
+    .filter((value) => value && !known.has(normalizeHeaderValue(value)));
+}
+
+function normalizeHeaderValue(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en");
+}
+
+function isCoachReviewed(status: string): boolean {
+  return status === "approved" || status === "edited" || status === "rejected";
 }
 
 function errorMessage(error: unknown) {

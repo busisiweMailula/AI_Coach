@@ -1,5 +1,7 @@
 import { ObjectId } from "mongodb";
 import { env } from "../../config/env.js";
+import { ensureExternalModelConsent, ensureResumeConsent } from "../../modules/privacy/privacy.service.js";
+import { sanitizeForLlm } from "../../modules/privacy/resume-anonymizer.js";
 import { getDb } from "../db/database.js";
 import { getTextEmbedder } from "./embedding-provider.js";
 
@@ -27,20 +29,37 @@ export interface RelevantResumeEvidence {
 export async function findRelevantResumeEvidence(input: {
   ownerId: ObjectId;
   resumeId: ObjectId;
-  anonymizedResumeText: string;
+  resumeText: string;
   queryText: string;
 }): Promise<RelevantResumeEvidence[]> {
-  const chunks = splitResumeText(input.anonymizedResumeText);
-  if (chunks.length === 0) return [];
+  const index = await rebuildResumeVectorIndex({ ...input, queryText: input.queryText });
+  if (!index.queryVector) return [];
+  return rankResumeEvidence(index.chunks, index.queryVector, MAX_EVIDENCE_CHUNKS);
+}
 
-  const embedder = getTextEmbedder();
-  const queryText = input.queryText.trim().slice(0, MAX_QUERY_CHARS);
-  const vectors = await embedder.embed([...chunks, ...(queryText ? [queryText] : [])]);
+export async function rebuildResumeVectorIndex(input: {
+  ownerId: ObjectId;
+  resumeId: ObjectId;
+  resumeText: string;
+  queryText?: string;
+}): Promise<{ chunks: ResumeVectorDocument[]; queryVector?: number[] }> {
+  await ensureResumeConsent(input.ownerId.toHexString());
+  await ensureExternalModelConsent(input.ownerId);
+
+  const chunks = splitResumeText(input.resumeText);
+  const queryText = input.queryText?.trim().slice(0, MAX_QUERY_CHARS) ?? "";
+  const collection = getDb().collection<ResumeVectorDocument>("resume_vector_chunks");
+  if (chunks.length === 0) {
+    await collection.deleteMany({ ownerId: input.ownerId, resumeId: input.resumeId });
+    return { chunks: [] };
+  }
+
+  const sanitizedInputs: string[] = [];
+  for (const chunk of chunks) sanitizedInputs.push(await sanitizeForLlm(chunk));
+  if (queryText) sanitizedInputs.push(await sanitizeForLlm(queryText));
+  const vectors = await getTextEmbedder().embed(sanitizedInputs);
   const resumeVectors = vectors.slice(0, chunks.length);
   const queryVector = queryText ? vectors[chunks.length] : resumeVectors[0];
-  if (!queryVector) return [];
-
-  const collection = getDb().collection<ResumeVectorDocument>("resume_vector_chunks");
   const now = new Date();
   await collection.bulkWrite(chunks.map((content, chunkIndex) => ({
     updateOne: {
@@ -48,7 +67,7 @@ export async function findRelevantResumeEvidence(input: {
       update: {
         $set: {
           content,
-          embedding: resumeVectors[chunkIndex],
+          embedding: resumeVectors[chunkIndex] ?? [],
           embeddingModel: env.MISTRAL_EMBEDDING_MODEL,
           updatedAt: now,
         },
@@ -64,7 +83,7 @@ export async function findRelevantResumeEvidence(input: {
   });
 
   const storedChunks = await collection.find({ ownerId: input.ownerId, resumeId: input.resumeId }).toArray();
-  return rankResumeEvidence(storedChunks, queryVector, MAX_EVIDENCE_CHUNKS);
+  return { chunks: storedChunks, ...(queryVector ? { queryVector } : {}) };
 }
 
 export function splitResumeText(text: string): string[] {

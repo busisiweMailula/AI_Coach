@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   ApiError,
   getConsentStatus,
@@ -14,12 +14,23 @@ import ConsentPage from "../features/privacy/ConsentPage";
 import PrivacyPolicyPage from "../features/privacy/PrivacyPolicyPage";
 import LoginPage from "../features/auth/LoginPage";
 import CandidateWorkspace from "../features/resume/CandidateWorkspace";
-import CoachReviewPage from "../features/reviews/CoachReviewPage";
 import AdminAccountsPage from "../features/users/AdminAccountsPage";
+import NotificationBell from "../features/notifications/NotificationBell";
+import NotificationCenter from "../features/notifications/NotificationCenter";
+
+// Coach feature pages & layout
+import DashboardLayout from "../features/coach/DashboardLayout";
+import CoachDashboardPage from "../features/coach/CoachDashboardPage";
+import CoachQueuePage from "../features/coach/CoachQueuePage";
+import CoachCompletedReviewsPage from "../features/coach/CoachCompletedReviewsPage";
+import CoachAccountPage from "../features/coach/CoachAccountPage";
+import CoachReviewDetailPage from "../features/coach/CoachReviewDetailPage";
 
 type ConsentViewState = "loading" | "error" | "required" | "accepted";
 
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [token, setToken] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole | null>(null);
@@ -62,13 +73,14 @@ export default function App() {
     }
   }
 
-  async function updateConsent(granted: boolean) {
+  async function updateConsent(granted: boolean, humanReview?: boolean) {
     if (!token) return;
     setConsentState("loading");
     setConsentError("");
     try {
       await recordConsent(token, "resume_processing", granted);
       if (granted) await recordConsent(token, "external_model_processing", true);
+      if (humanReview !== undefined) await recordConsent(token, "human_review", humanReview);
       const status = await getConsentStatus(token);
       const resumeAccepted = hasConsent(status, "resume_processing");
       const externalModelAccepted = hasConsent(status, "external_model_processing");
@@ -86,9 +98,151 @@ export default function App() {
     setToken(null);
     setEmail("");
     setRole(null);
+    navigate("/");
   }
 
+  const isCoachRoute = location.pathname.startsWith("/coach");
   const isCandidateWorkspace = Boolean(token && role === "candidate" && consentState === "accepted");
+
+  // Handle Coach Workspace Routes
+  if (isCoachRoute) {
+    if (!token) {
+      return (
+        <div className="shell shell-auth">
+          <LoginPage
+            onRegister={async (userEmail, password) => {
+              await registerCandidate(userEmail, password);
+            }}
+            onLogin={async (userEmail, password) => {
+              const result = await login(userEmail, password);
+              setEmail(result.user.email);
+              setRole(result.user.role);
+              setToken(result.accessToken);
+              if (result.user.role === "coach") {
+                navigate(location.pathname);
+              }
+            }}
+          />
+        </div>
+      );
+    }
+
+    // Coach Guard: candidate and admin cannot access coach routes
+    if (role !== "coach") {
+      return (
+        <div className="shell shell-auth">
+          <section className="card narrow" role="alert">
+            <p className="eyebrow">Access Denied (403)</p>
+            <h1>Coach workspace restricted</h1>
+            <p className="intro">
+              This workspace is restricted to career coaches. Your account role ({role}) does not have permission to access the coach portal.
+            </p>
+            <div className="actions mt-4">
+              <Link to="/" className="primary button inline-block">Return to home</Link>
+              <button type="button" className="secondary button" onClick={signOut}>Sign out</button>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    // Authenticated Coach
+    return (
+      <Routes>
+        <Route
+          path="/coach"
+          element={
+            <DashboardLayout
+              token={token}
+              coachEmail={email}
+              onSignOut={signOut}
+              breadcrumb="Coach workspace › Dashboard"
+            >
+              <CoachDashboardPage token={token} coachEmail={email} />
+            </DashboardLayout>
+          }
+        />
+        <Route
+          path="/coach/queue"
+          element={
+            <DashboardLayout
+              token={token}
+              coachEmail={email}
+              onSignOut={signOut}
+              breadcrumb="Coach workspace › Review queue"
+            >
+              <CoachQueuePage token={token} />
+            </DashboardLayout>
+          }
+        />
+        <Route
+          path="/coach/reviews"
+          element={
+            <DashboardLayout
+              token={token}
+              coachEmail={email}
+              onSignOut={signOut}
+              breadcrumb="Coach workspace › My reviews"
+            >
+              <CoachCompletedReviewsPage token={token} />
+            </DashboardLayout>
+          }
+        />
+        <Route
+          path="/coach/reviews/:reviewId"
+          element={
+            <DashboardLayout
+              token={token}
+              coachEmail={email}
+              onSignOut={signOut}
+              breadcrumb="Coach workspace › Review detail"
+            >
+              <CoachReviewDetailPage token={token} coachEmail={email} />
+            </DashboardLayout>
+          }
+        />
+        <Route
+          path="/coach/notifications"
+          element={
+            <DashboardLayout
+              token={token}
+              coachEmail={email}
+              onSignOut={signOut}
+              breadcrumb="Coach workspace › Notifications"
+            >
+              <NotificationCenter token={token} />
+            </DashboardLayout>
+          }
+        />
+        <Route
+          path="/coach/account"
+          element={
+            <DashboardLayout
+              token={token}
+              coachEmail={email}
+              onSignOut={signOut}
+              breadcrumb="Coach workspace › My account"
+            >
+              <CoachAccountPage token={token} coachEmail={email} onSignOut={signOut} />
+            </DashboardLayout>
+          }
+        />
+        <Route path="*" element={<Navigate to="/coach" replace />} />
+      </Routes>
+    );
+  }
+
+  // Redirect coach to /coach if accessing root or other non-coach paths
+  if (token && role === "coach") {
+    if (location.pathname.startsWith("/reviews/")) {
+      const id = location.pathname.split("/").pop();
+      return <Navigate to={`/coach/reviews/${id}`} replace />;
+    }
+    if (location.pathname === "/notifications") {
+      return <Navigate to="/coach/notifications" replace />;
+    }
+    return <Navigate to="/coach" replace />;
+  }
 
   return (
     <Routes>
@@ -102,9 +256,10 @@ export default function App() {
                 <Link className="brand" to="/" aria-label="CV Matching Agent home">CV Matching Agent</Link>
                 <div className="header-actions">
                   <span className="secure-label">
-                    {role === "coach" ? "Coach review portal" : role === "admin" ? "Admin account portal" : "Private candidate workspace"}
+                    {role === "admin" ? "Admin account portal" : "Private candidate workspace"}
                   </span>
                   <span className="header-account-email">{email}</span>
+                  <NotificationBell token={token} />
                   <button className="header-signout-button" type="button" title="Sign out" aria-label="Sign out" onClick={signOut}>
                     <span aria-hidden="true">↪</span>
                   </button>
@@ -122,12 +277,15 @@ export default function App() {
                   setEmail(result.user.email);
                   setRole(result.user.role);
                   setToken(result.accessToken);
+                  if (result.user.role === "coach") {
+                    navigate("/coach");
+                  }
                 }}
               />
-            ) : role === "coach" ? (
-              <CoachReviewPage token={token} />
             ) : role === "admin" ? (
-              <AdminAccountsPage token={token} />
+              location.pathname === "/notifications"
+                ? <NotificationCenter token={token} />
+                : <AdminAccountsPage token={token} />
             ) : role !== "candidate" ? (
               <section className="card narrow" role="alert">
                 <p className="eyebrow">Account access unavailable</p>
@@ -152,7 +310,7 @@ export default function App() {
               </section>
             ) : consentState === "required" ? (
               <ConsentPage
-                onAgree={() => updateConsent(true)}
+                onAgree={(humanReview) => updateConsent(true, humanReview)}
               />
             ) : (
               <CandidateWorkspace

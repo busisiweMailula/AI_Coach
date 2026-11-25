@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +7,8 @@ import JSZip from "jszip";
 import { ObjectId } from "mongodb";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { structureCv } from "../src/modules/resumes/structured-cv.js";
+import { structuredCvVersion } from "../src/modules/resumes/resume-suggestions.js";
 
 let app: Express;
 let database: import("../src/infra/db/json-database.js").JsonDatabase;
@@ -27,6 +29,7 @@ const databasePath = path.join(os.tmpdir(), `ai-coach-phase5-${randomUUID()}.jso
 beforeAll(async () => {
   process.env.NODE_ENV = "test";
   process.env.LLM_PROVIDER = "mock";
+  process.env.EMBEDDING_PROVIDER = "disabled";
   process.env.LLM_MODEL = "mock-v1";
   process.env.RATE_LIMIT_MAX_REQUESTS = "1000";
   process.env.JSON_DB_PATH = databasePath;
@@ -190,21 +193,76 @@ describe("Phase 5 AI workflows", () => {
     expect(decision.body.data.status).toBe("approved");
   });
 
-  it("blocks fabricated resume suggestions and enforces external-model consent", async () => {
+  it("finds resume evidence in original text after masking PII at the LLM boundary", async () => {
     await grantResumeConsent();
-    const { resumeId, jobDescriptionId } = await seedResumeAndDescription("__test_fabrication_case__");
+    const sourceText = "Sipho Dlamini delivered REST APIs, webhooks, and cloud deployment.";
+    const { resumeId, jobDescriptionId } = await seedResumeAndDescription(sourceText);
+    await database.collection("job_descriptions").updateOne(
+      { _id: jobDescriptionId, ownerId },
+      {
+        $set: {
+          requiredSkills: ["REST APIs", "webhooks", "cloud deployment"].map((name) => ({
+            name,
+            evidenceSnippet: `Required skill: ${name}`,
+          })),
+        },
+      },
+    );
+    configureResumeAnonymizer({
+      anonymize: async (text) => text.replaceAll("Sipho Dlamini", "<PERSON>"),
+    });
+
+    try {
+      const submitted = await request(app)
+        .post("/api/v1/matching/analyze")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .send({ resumeId: resumeId.toHexString(), jobDescriptionId: jobDescriptionId.toHexString() });
+      expect(submitted.status).toBe(202);
+      const status = await waitForJob(submitted.body.data.jobId as string);
+      expect(status.status).toBe("succeeded");
+
+      const match = await request(app)
+        .get(`/api/v1/matches/${status.resultId as string}`)
+        .set("Authorization", `Bearer ${ownerToken}`);
+      expect(match.status).toBe(200);
+      expect(match.body.data.skillResults).toEqual([
+        { name: "REST APIs", status: "matched", evidenceSnippet: "REST APIs" },
+        { name: "webhooks", status: "matched", evidenceSnippet: "webhooks" },
+        { name: "cloud deployment", status: "matched", evidenceSnippet: "cloud deployment" },
+      ]);
+      const storedResume = await database.collection("resumes").findOne({ _id: resumeId, ownerId });
+      expect(storedResume?.extractedText).toBe(sourceText);
+    } finally {
+      configureResumeAnonymizer({ anonymize: async (text) => text });
+    }
+  });
+
+  it("flags unsupported resume claims and enforces external-model consent", async () => {
+    await grantResumeConsent();
+    const { resumeId, jobDescriptionId } = await seedResumeAndDescription(
+      "PROFESSIONAL SUMMARY\n__test_fabrication_case__",
+    );
     const submission = await request(app)
       .post("/api/v1/resumes/optimize")
       .set("Authorization", `Bearer ${ownerToken}`)
       .send({ resumeId: resumeId.toHexString(), jobDescriptionId: jobDescriptionId.toHexString() });
     expect(submission.status).toBe(202);
     const status = await waitForJob(submission.body.data.jobId as string);
-    expect(status.status).toBe("failed");
-    expect(status.error.code).toBe("FABRICATION_GUARDRAIL_HIT");
+    expect(status.status).toBe("succeeded");
     const suggestions = await request(app)
       .get("/api/v1/suggestions")
       .set("Authorization", `Bearer ${ownerToken}`);
-    expect(suggestions.body.data.items).toHaveLength(0);
+    expect(suggestions.body.data.items).toHaveLength(1);
+    expect(suggestions.body.data.items[0]).toMatchObject({
+      status: "pending",
+      needsUserInput: expect.any(String),
+      flags: ["needs_user_confirmation"],
+    });
+    const unsafeAcceptance = await request(app)
+      .post(`/api/v1/suggestions/${suggestions.body.data.items[0].id as string}/decision`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ decision: "accept" });
+    expect(unsafeAcceptance.status).toBe(400);
 
     const noConsentResume = await seedResumeAndDescription("Python API developer", otherId);
     await grantResumeConsent(otherId);
@@ -221,10 +279,97 @@ describe("Phase 5 AI workflows", () => {
     expect(failedConsentJob.error.code).toBe("FORBIDDEN");
   });
 
+  it("keeps candidate contact details out of the model input", async () => {
+    await grantResumeConsent();
+    const sourceText = [
+      "Thandiwe Mokoena",
+      "thandiwe@example.test",
+      "+27 82 123 4567",
+      "PROFESSIONAL SUMMARY",
+      "Built secure APIs.",
+    ].join("\n");
+    const { resumeId, jobDescriptionId } = await seedResumeAndDescription(sourceText);
+    let modelInput = "";
+    configureResumeAnonymizer({
+      anonymize: async (text) => {
+        modelInput = text;
+        return text;
+      },
+    });
+
+    try {
+      const submission = await request(app)
+        .post("/api/v1/resumes/optimize")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .send({ resumeId: resumeId.toHexString(), jobDescriptionId: jobDescriptionId.toHexString() });
+      expect(submission.status).toBe(202);
+      expect((await waitForJob(submission.body.data.jobId as string)).status).toBe("succeeded");
+      expect(modelInput).toContain("Built secure APIs.");
+      expect(modelInput).not.toContain("Thandiwe Mokoena");
+      expect(modelInput).not.toContain("thandiwe@example.test");
+      expect(modelInput).not.toContain("+27 82 123 4567");
+    } finally {
+      configureResumeAnonymizer({ anonymize: async (text) => text });
+    }
+  });
+
+  it("recovers a legacy structured CV from its stored original DOCX", async () => {
+    await grantResumeConsent();
+    const [{ extractDocument }, { LocalFileStorage }] = await Promise.all([
+      import("../src/infra/files/document-extractor.js"),
+      import("../src/infra/storage/local-file-storage.js"),
+    ]);
+    const sourceText = [
+      "Thandiwe Mokoena",
+      "thandiwe@example.test",
+      "PROFESSIONAL SUMMARY",
+      "Built secure APIs.",
+      "CORE COMPETENCIES",
+      "Cloud: AWS, Azure",
+      "TECHNICAL SKILLS",
+      "Languages: TypeScript, Python",
+    ].join("\n");
+    const buffer = await createDocx(sourceText);
+    const originalFileName = "legacy-resume.docx";
+    const contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const extracted = await extractDocument(buffer, originalFileName, contentType, ["docx"]);
+    const resumeId = new ObjectId();
+    const storageKey = `resumes/${ownerId.toHexString()}/${resumeId.toHexString()}.docx`;
+    const storage = new LocalFileStorage(storageRoot);
+    await storage.put(storageKey, buffer);
+    await database.collection("resumes").insertOne({
+      _id: resumeId,
+      ownerId,
+      originalFileName,
+      contentType: extracted.contentType,
+      sizeBytes: buffer.length,
+      sha256: createHash("sha256").update(buffer).digest("hex"),
+      storageKey,
+      extractedText: extracted.text,
+      textExtractionStatus: "extracted",
+      parseStatus: "uploaded",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const preview = await request(app)
+      .get(`/api/v1/resumes/${resumeId.toHexString()}/cv/preview`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(preview.status).toBe(200);
+    expect(preview.body.data.structuredCv.header.name).toBe("Thandiwe Mokoena");
+    expect(preview.body.data.structuredCv.sections.map((section: { heading: string }) => section.heading))
+      .toEqual(["PROFESSIONAL SUMMARY", "CORE COMPETENCIES", "TECHNICAL SKILLS"]);
+    const persisted = await database.collection("resumes").findOne({ _id: resumeId, ownerId });
+    expect(persisted?.structuredCv).toBeTruthy();
+  });
+
   it("generates an owner-scoped CV draft with accepted suggestions only", async () => {
     await grantResumeConsent();
-    const sourceText = "Created secure APIs. Led project planning.";
+    const sourceText = "PROFESSIONAL SUMMARY\nCreated secure APIs. Led project planning.";
     const { resumeId, jobDescriptionId } = await seedResumeAndDescription(sourceText);
+    await grantResumeConsent(otherId);
+    const baseCv = structureCv(sourceText);
+    const summary = baseCv.sections[0]!;
     const acceptedId = new ObjectId();
     const rejectedId = new ObjectId();
     const otherJobSuggestionId = new ObjectId();
@@ -239,6 +384,13 @@ describe("Phase 5 AI workflows", () => {
         proposedText: "Designed and delivered secure APIs.",
         reason: "Clarifies the contribution.",
         sourceSnippet: "Created secure APIs.",
+        sectionId: summary.id,
+        field: "text",
+        operation: "replace",
+        baseVersion: structuredCvVersion(baseCv),
+        sectionTitle: summary.heading,
+        locationLabel: summary.heading,
+        jobRequirement: "Secure API design.",
         status: "accepted",
         reviewStatus: "not_required",
         flags: [],
@@ -254,6 +406,13 @@ describe("Phase 5 AI workflows", () => {
         proposedText: "Directed cross-functional project planning.",
         reason: "Clarifies the contribution.",
         sourceSnippet: "Led project planning.",
+        sectionId: summary.id,
+        field: "text",
+        operation: "replace",
+        baseVersion: structuredCvVersion(baseCv),
+        sectionTitle: summary.heading,
+        locationLabel: summary.heading,
+        jobRequirement: "Project planning.",
         status: "rejected",
         reviewStatus: "not_required",
         flags: [],
@@ -269,7 +428,14 @@ describe("Phase 5 AI workflows", () => {
         proposedText: "Directed cross-functional project planning.",
         reason: "Clarifies the contribution.",
         sourceSnippet: "Led project planning.",
-        status: "accepted",
+        sectionId: summary.id,
+        field: "text",
+        operation: "replace",
+        baseVersion: structuredCvVersion(baseCv),
+        sectionTitle: summary.heading,
+        locationLabel: summary.heading,
+        jobRequirement: "Project planning.",
+        status: "rejected",
         reviewStatus: "not_required",
         flags: [],
         createdAt: now,
@@ -281,8 +447,13 @@ describe("Phase 5 AI workflows", () => {
       .get(`/api/v1/resumes/${resumeId.toHexString()}/draft?jobDescriptionId=${jobDescriptionId.toHexString()}`)
       .set("Authorization", `Bearer ${ownerToken}`);
     expect(response.status).toBe(200);
-    expect(response.body.data.content).toBe("Designed and delivered secure APIs. Led project planning.");
-    expect(response.body.data.appliedSuggestionIds).toEqual([acceptedId.toHexString()]);
+    expect(response.body.data.structuredCv.sections[0].paragraphs[0].text)
+      .toBe("Designed and delivered secure APIs.");
+    expect(response.body.data.acceptedSuggestions).toHaveLength(1);
+    expect(response.body.data.acceptedSuggestions[0]).toMatchObject({
+      id: acceptedId.toHexString(),
+      applicationStatus: "applied",
+    });
 
     const hidden = await request(app)
       .get(`/api/v1/resumes/${resumeId.toHexString()}/draft?jobDescriptionId=${jobDescriptionId.toHexString()}`)
@@ -290,10 +461,13 @@ describe("Phase 5 AI workflows", () => {
     expect(hidden.status).toBe(404);
   });
 
-  it("applies accepted suggestions when anonymization changes line wrapping and entity text", async () => {
+  it("returns accepted suggestion placement against original resume text without re-anonymizing for display", async () => {
     await grantResumeConsent();
-    const sourceText = "Highlights:\nBuilt a scalable system for Example Corp.\nResult: reduced latency";
+    const sourceText = "HIGHLIGHTS\nBuilt a scalable system for Example Corp.\nResult: reduced latency";
     const { resumeId, jobDescriptionId } = await seedResumeAndDescription(sourceText);
+    const baseCv = structureCv(sourceText);
+    const section = baseCv.sections[0]!;
+    const line = section.paragraphs[0]!;
     const suggestionId = new ObjectId();
     const now = new Date();
     await database.collection("resume_suggestions").insertOne({
@@ -301,32 +475,134 @@ describe("Phase 5 AI workflows", () => {
       ownerId,
       resumeId,
       jobDescriptionId,
-      originalText: "Built a scalable system for <ORGANIZATION>.",
+      originalText: "Built a scalable system for Example Corp.",
       proposedText: "Built a scalable system supporting business operations.",
       reason: "Clarifies the contribution.",
-      sourceSnippet: "Built a scalable system for <ORGANIZATION>.",
+      sourceSnippet: "Built a scalable system for Example Corp.",
+      sectionId: section.id,
+      bulletId: line.id,
+      field: "text",
+      operation: "replace",
+      baseVersion: structuredCvVersion(baseCv),
+      sectionTitle: section.heading,
+      locationLabel: `${section.heading} › item 1`,
+      jobRequirement: "Describe system scale.",
       status: "accepted",
       reviewStatus: "not_required",
       flags: [],
       createdAt: now,
       updatedAt: now,
     });
-    configureResumeAnonymizer({
-      anonymize: async () => "Highlights: Built a scalable system for <ORGANIZATION>. Result: reduced latency",
+    const response = await request(app)
+      .get(`/api/v1/resumes/${resumeId.toHexString()}/draft?jobDescriptionId=${jobDescriptionId.toHexString()}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.structuredCv.sections[0].paragraphs[0].text)
+      .toBe("Built a scalable system supporting business operations.");
+    expect(response.body.data.acceptedSuggestions).toMatchObject([{
+      id: suggestionId.toHexString(),
+      applicationStatus: "applied",
+    }]);
+  });
+
+  it("accepts, rejects, and previews anchored edits without losing the source CV", async () => {
+    await grantResumeConsent();
+    await grantResumeConsent(otherId);
+    const sourceText = "PROFESSIONAL SUMMARY\nCreated APIs for an internal pilot.";
+    const { resumeId, jobDescriptionId } = await seedResumeAndDescription(sourceText);
+    const baseCv = structureCv(sourceText);
+    const summary = baseCv.sections[0]!;
+    const suggestionId = new ObjectId();
+    await database.collection("resume_suggestions").insertOne({
+      _id: suggestionId,
+      ownerId,
+      resumeId,
+      jobDescriptionId,
+      originalText: "Created APIs for an internal pilot.",
+      proposedText: "Built secure APIs for an internal pilot.",
+      reason: "Keep the summary concise.",
+      sourceSnippet: "Created APIs for an internal pilot.",
+      sectionId: summary.id,
+      field: "text",
+      operation: "replace",
+      baseVersion: structuredCvVersion(baseCv),
+      sectionTitle: summary.heading,
+      locationLabel: summary.heading,
+      jobRequirement: "API development.",
+      status: "pending",
+      reviewStatus: "not_required",
+      flags: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
-    try {
-      const response = await request(app)
-        .get(`/api/v1/resumes/${resumeId.toHexString()}/draft?jobDescriptionId=${jobDescriptionId.toHexString()}`)
-        .set("Authorization", `Bearer ${ownerToken}`);
+    const invalidAccept = await request(app)
+      .post(`/api/v1/suggestions/${suggestionId.toHexString()}/decision`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ decision: "accept", proposedText: "Add more detail about production." });
+    expect(invalidAccept.status).toBe(400);
 
-      expect(response.status).toBe(200);
-      expect(response.body.data.content)
-        .toBe("Highlights:\nBuilt a scalable system supporting business operations.\nResult: reduced latency");
-      expect(response.body.data.appliedSuggestionIds).toEqual([suggestionId.toHexString()]);
-    } finally {
-      configureResumeAnonymizer({ anonymize: async (text) => text });
-    }
+    const accepted = await request(app)
+      .post(`/api/v1/suggestions/${suggestionId.toHexString()}/decision`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ decision: "accept" });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.data).toMatchObject({ status: "accepted", applicationStatus: "applied" });
+
+    const preview = await request(app)
+      .get(`/api/v1/resumes/${resumeId.toHexString()}/cv/preview`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(preview.status).toBe(200);
+    expect(preview.body.data.structuredCv.sections[0].paragraphs[0].text)
+      .toBe("Built secure APIs for an internal pilot.");
+
+    const repeatedAccept = await request(app)
+      .post(`/api/v1/suggestions/${suggestionId.toHexString()}/decision`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ decision: "accept" });
+    expect(repeatedAccept.status).toBe(200);
+    const repeatedPreview = await request(app)
+      .get(`/api/v1/resumes/${resumeId.toHexString()}/cv/preview`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(repeatedPreview.body.data.structuredCv.sections[0].paragraphs[0].text)
+      .toBe("Built secure APIs for an internal pilot.");
+
+    const download = await request(app)
+      .get(`/api/v1/resumes/${resumeId.toHexString()}/cv/download`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+        response.on("end", () => callback(null, Buffer.concat(chunks)));
+      });
+    expect(download.status).toBe(200);
+    expect(download.headers["content-type"]).toContain(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    const archive = await JSZip.loadAsync(download.body as Buffer);
+    const wordXml = await archive.file("word/document.xml")?.async("string") ?? "";
+    expect(wordXml).toContain("Built secure APIs for an internal pilot.");
+    expect(wordXml).not.toContain("Created APIs for an internal pilot.");
+
+    const hiddenDecision = await request(app)
+      .post(`/api/v1/suggestions/${suggestionId.toHexString()}/decision`)
+      .set("Authorization", `Bearer ${otherToken}`)
+      .send({ decision: "reject" });
+    expect(hiddenDecision.status).toBe(404);
+
+    const rejected = await request(app)
+      .post(`/api/v1/suggestions/${suggestionId.toHexString()}/decision`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ decision: "reject" });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.data).toMatchObject({ status: "rejected", applicationStatus: "not_applied" });
+    const restored = await request(app)
+      .get(`/api/v1/resumes/${resumeId.toHexString()}/cv/preview`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(restored.body.data.structuredCv.sections[0].paragraphs[0].text)
+      .toBe("Created APIs for an internal pilot.");
   });
 
   it("resumes an in-memory checkpoint after database reconnect and stores rubric evaluation and progress", async () => {
@@ -462,6 +738,7 @@ async function seedResumeAndDescription(
     sha256: "a".repeat(64),
     storageKey: `resumes/${candidateId.toHexString()}/${resumeId.toHexString()}.pdf`,
     extractedText: resumeText,
+    structuredCv: structureCv(resumeText),
     textExtractionStatus: "extracted",
     parseStatus: "uploaded",
     createdAt: now,
@@ -496,6 +773,16 @@ async function grantResumeConsent(candidateId = ownerId): Promise<void> {
     revokedAt: null,
     source: "settings",
   });
+  await database.collection("consents").insertOne({
+    _id: new ObjectId(),
+    ownerId: candidateId,
+    purpose: "human_review",
+    policyVersion: "human-review-v1",
+    granted: true,
+    recordedAt: new Date(),
+    revokedAt: null,
+    source: "settings",
+  });
 }
 
 async function waitForJob(jobId: string, token = ownerToken): Promise<Record<string, unknown>> {
@@ -525,7 +812,12 @@ async function createDocx(text: string): Promise<Buffer> {
     "word/document.xml",
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-      `<w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`,
+      `<w:body>${text.split(/\r?\n/).map((line) =>
+        `<w:p><w:r><w:t>${escapeXml(line)}</w:t></w:r></w:p>`).join("")}<w:sectPr/></w:body></w:document>`,
   );
   return archive.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
+function escapeXml(text: string): string {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
