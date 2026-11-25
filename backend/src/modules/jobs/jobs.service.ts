@@ -6,7 +6,7 @@ import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 import { extractDocument } from "../../infra/files/document-extractor.js";
 import type { AsyncJobDocument } from "../../infra/jobs/job.model.js";
-import { LocalFileStorage } from "../../infra/storage/local-file-storage.js";
+import { MongoGridFsStorage } from "../../infra/storage/mongodb-gridfs-storage.js";
 import { scheduleAgentJob } from "../../infra/jobs/job-queue.js";
 import { ValidationError } from "../../common/errors.js";
 import type { JobDescriptionDocument } from "./job-description.model.js";
@@ -23,7 +23,7 @@ export const jobTextSchema = z.object({
     .max(env.MAX_EXTRACTED_TEXT_CHARS),
 }).strict();
 
-const storage = new LocalFileStorage();
+const storage = new MongoGridFsStorage();
 
 export async function submitJobDescription(input: {
   ownerId: string;

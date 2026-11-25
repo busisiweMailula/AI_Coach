@@ -51,7 +51,7 @@ export async function processAgentJob(id: ObjectId): Promise<void> {
   const claimed = await jobs().findOneAndUpdate(
     { _id: id, status: "queued" },
     { $set: { status: "running", updatedAt: now }, $inc: { attempt: 1 } },
-    { returnDocument: "after" },
+    { returnDocument: "after", includeResultMetadata: false },
   );
   if (!claimed) return;
 

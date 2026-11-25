@@ -3,12 +3,14 @@ import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { ensureIndexes } from "./infra/db/indexes.js";
 import { closeDatabase, connectDatabase } from "./infra/db/database.js";
+import { closePostgres, ensurePostgresAuditTable } from "./infra/db/postgres.js";
 import { resumeQueuedAgentJobs } from "./infra/jobs/job-queue.js";
 import { bootstrapDemoAdmin } from "./modules/users/demo-admin-bootstrap.js";
 
 async function start(): Promise<void> {
   await connectDatabase();
   await ensureIndexes();
+  await ensurePostgresAuditTable();
   if (process.env.DEMO_ADMIN_EMAIL || process.env.DEMO_ADMIN_PASSWORD) {
     const result = await bootstrapDemoAdmin({
       nodeEnv: env.NODE_ENV,
@@ -30,7 +32,7 @@ async function start(): Promise<void> {
   const shutdown = (signal: string) => {
     logger.info({ signal }, "Shutting down");
     server.close((error) => {
-      void closeDatabase().then(() => {
+      void Promise.all([closeDatabase(), closePostgres()]).then(() => {
         if (error) {
           logger.error({ err: error }, "HTTP server shutdown failed");
           process.exitCode = 1;
@@ -45,7 +47,7 @@ async function start(): Promise<void> {
 
 start().catch(async (error: unknown) => {
   logger.fatal({ err: error }, "Failed to start API server");
-  await closeDatabase();
+  await Promise.all([closeDatabase(), closePostgres()]);
   process.exitCode = 1;
 });
 

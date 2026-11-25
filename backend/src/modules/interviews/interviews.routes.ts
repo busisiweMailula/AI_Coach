@@ -234,7 +234,7 @@ async function beginEvaluation(
   const result = await getDb().collection<InterviewSessionDocument>("interview_sessions").findOneAndUpdate(
     { _id: session._id, ownerId, status: "in_progress" },
     { $set: { status: "evaluating", updatedAt: new Date() } },
-    { returnDocument: "after" },
+    { returnDocument: "after", includeResultMetadata: false },
   );
   if (!result) {
     const updated = await getDb().collection<InterviewSessionDocument>("interview_sessions")

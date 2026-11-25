@@ -1,7 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import type { Express } from "express";
 import JSZip from "jszip";
 import { ObjectId } from "mongodb";
@@ -9,7 +6,7 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 let app: Express;
-let database: import("../src/infra/db/json-database.js").JsonDatabase;
+let database: import("mongodb").Db;
 let ownerId: ObjectId;
 let coachId: ObjectId;
 let otherId: ObjectId;
@@ -21,17 +18,13 @@ let closeDatabase: typeof import("../src/infra/db/database.js").closeDatabase;
 let ensureIndexes: typeof import("../src/infra/db/indexes.js").ensureIndexes;
 let signAccessToken: typeof import("../src/middleware/auth.js").signAccessToken;
 let configureResumeAnonymizer: typeof import("../src/modules/privacy/resume-anonymizer.js").configureResumeAnonymizer;
-const storageRoot = path.join(os.tmpdir(), `ai-coach-phase5-${randomUUID()}`);
-const databasePath = path.join(os.tmpdir(), `ai-coach-phase5-${randomUUID()}.json`);
-
 beforeAll(async () => {
   process.env.NODE_ENV = "test";
   process.env.LLM_PROVIDER = "mock";
   process.env.LLM_MODEL = "mock-v1";
   process.env.RATE_LIMIT_MAX_REQUESTS = "1000";
-  process.env.JSON_DB_PATH = databasePath;
-  process.env.FILE_STORAGE_DIR = storageRoot;
-
+  process.env.MONGODB_URI = process.env.MONGODB_TEST_URI ?? "mongodb://127.0.0.1:27017";
+  process.env.MONGODB_DB_NAME = `ai_coach_test_phase5_${randomUUID().replace(/-/g, "")}`;
   const [databaseModule, indexModule, appModule, authModule, anonymizerModule] = await Promise.all([
     import("../src/infra/db/database.js"),
     import("../src/infra/db/indexes.js"),
@@ -60,7 +53,6 @@ beforeAll(async () => {
 beforeEach(async () => {
   await database.dropDatabase();
   await ensureIndexes();
-  await rm(storageRoot, { recursive: true, force: true });
   const now = new Date();
   for (const user of [
     {
@@ -101,9 +93,8 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  if (database) await database.dropDatabase();
   await closeDatabase();
-  await rm(storageRoot, { recursive: true, force: true });
-  await rm(databasePath, { force: true });
 });
 
 describe("Phase 5 AI workflows", () => {

@@ -234,7 +234,7 @@ workflowsRouter.post(
     const result = await getDb().collection<ResumeSuggestionDocument>("resume_suggestions").findOneAndUpdate(
       { _id: id, ownerId: new ObjectId(req.auth.userId), status: "pending" },
       { $set: { status: req.body.decision === "accept" ? "accepted" : "rejected", updatedAt: new Date() } },
-      { returnDocument: "after" },
+      { returnDocument: "after", includeResultMetadata: false },
     );
     if (!result) {
       const exists = await getDb().collection<ResumeSuggestionDocument>("resume_suggestions")

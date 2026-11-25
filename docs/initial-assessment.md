@@ -4,9 +4,9 @@ Historical assessment date: 2026-11-16
 
 ## Update (2026-11-19)
 
-The backend has since grown beyond the Phase 3 scaffold described below. It now includes resume and job-description intake, consent handling, queued AI workflows, LLM integrations, guardrails, review workflows, interview graphs, and owner-scoped API routes. Application data currently uses a local JSON file, semantic resume evidence retrieval uses Mistral embeddings with local cosine ranking, and graph checkpoints remain in process memory. MongoDB is planned as a later migration.
+This assessment records the repository's earlier state before the MongoDB migration. The backend now includes resume and job-description intake, consent handling, queued AI workflows, LLM integrations, guardrails, review workflows, interview graphs, owner-scoped API routes, and MongoDB-backed application persistence. Semantic resume evidence retrieval uses Mistral embeddings with local cosine ranking, and graph checkpoints remain in process memory.
 
-The JSON file is a temporary, unencrypted, single-process development store and is not suitable for production. Semantic retrieval requires a Mistral key and external-model consent. Production concerns such as privileged-account provisioning, short-lived/revocable tokens, data export/deletion, durable graph checkpoints, and end-to-end/AI evaluation are still outstanding.
+The historical JSON store was a temporary, unencrypted, single-process development store; use the documented guarded migration command for existing data. Semantic retrieval requires a Mistral key and external-model consent. Production concerns such as privileged-account provisioning, short-lived/revocable tokens, data export/deletion, durable graph checkpoints, and end-to-end/AI evaluation are still outstanding.
 
 Current validation: `npm test` and `npm run build` pass. Docker Compose validation was unavailable because the Docker CLI is not installed in the environment.
 

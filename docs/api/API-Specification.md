@@ -10,7 +10,7 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 - Error response: `{ "success": false, "error": { "code": "...", "message": "...", "details"?: ... }, "requestId": "..." }`.
 - Candidate-owned resources are scoped to the authenticated user. Unauthorized cross-owner access does not reveal whether the resource exists.
 - Long-running analysis, generation, and evaluation return `202 Accepted` with a job ID; poll `/jobs/status/{jobId}`. Resume text extraction occurs during upload; structured parsing and AI workflows run asynchronously. AI workflows require a configured provider and active `external_model_processing` consent.
-- `GET /candidates/me/consents/status` returns the server's current policy versions and whether the authenticated candidate accepted them. `PUT /candidates/me/consents` accepts only `purpose` and `granted`; the server chooses the policy version and appends a history record. Upload consent is checked from the local JSON data file before multipart parsing; a multipart consent flag is not accepted.
+- `GET /candidates/me/consents/status` returns the server's current policy versions and whether the authenticated candidate accepted them. `PUT /candidates/me/consents` accepts only `purpose` and `granted`; the server chooses the policy version and appends a history record in MongoDB. Upload consent is checked before multipart parsing; a multipart consent flag is not accepted.
 - Scores are indicative coaching feedback, not hiring decisions. Every match skill result includes evidence or is labeled `no_evidence_found`.
 
 ## Endpoint catalog
@@ -65,7 +65,7 @@ Status: Phases 1–5 endpoints listed below are implemented unless explicitly id
 | `PATCH /admin/config` | Admin | Update validated versioned thresholds/config |
 | `GET /admin/audit-logs` | Admin | Read the latest 250 account and application activity events without request bodies or candidate content |
 
-Admin and coach endpoints re-check the account role against the JSON database for each privileged request. Deactivated users cannot sign in, and existing access tokens are rejected on subsequent requests. Candidate self-registration cannot select a role; candidates cannot be promoted to coaches, which admins instead register directly. Admin accounts require controlled provisioning and cannot be deactivated from this screen. Account-status changes and other authenticated write actions are recorded as metadata-only audit events.
+Admin and coach endpoints re-check the account role against MongoDB for each privileged request. Deactivated users cannot sign in, and existing access tokens are rejected on subsequent requests. Candidate self-registration cannot select a role; candidates cannot be promoted to coaches, which admins instead register directly. Admin accounts require controlled provisioning and cannot be deactivated from this screen. Account-status changes and other authenticated write actions are recorded as metadata-only audit events.
 
 CV drafts are only shared with a coach after the candidate explicitly selects **Send CV draft to coach**. The coach receives the submitted draft snapshot and may return written recommendations; the candidate can view the coach response alongside the model suggestions in Resume Studio.
 

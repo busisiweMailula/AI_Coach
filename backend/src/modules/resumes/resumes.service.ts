@@ -9,7 +9,7 @@ import { env } from "../../config/env.js";
 import { scheduleAgentJob } from "../../infra/jobs/job-queue.js";
 import { logger } from "../../config/logger.js";
 import { extractDocument } from "../../infra/files/document-extractor.js";
-import { LocalFileStorage } from "../../infra/storage/local-file-storage.js";
+import { MongoGridFsStorage } from "../../infra/storage/mongodb-gridfs-storage.js";
 import { NotFoundError } from "../../common/errors.js";
 import type { ResumeDocument, ResumeMetadataUpdate } from "./resume.model.js";
 import { deleteResume, findParsedResumeData, findResume, insertResume, listResumes, updateResume } from "./resumes.repository.js";
@@ -25,7 +25,7 @@ import {
 import { getConsentStatus } from "../privacy/privacy.service.js";
 import { prepareResumeTextForAI } from "../privacy/resume-anonymizer.js";
 
-const storage = new LocalFileStorage();
+const storage = new MongoGridFsStorage();
 
 export async function uploadResume(input: {
   ownerId: string;

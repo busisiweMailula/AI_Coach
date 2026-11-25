@@ -8,7 +8,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   JWT_EXPIRES_IN: z.string().default("7d"),
-  JSON_DB_PATH: z.string().min(1).default(".data/ai-coach.json"),
+  MONGODB_URI: z.string().min(1),
+  MONGODB_DB_NAME: z.string().min(1).default("ai_coach"),
+  POSTGRES_URL: z.string().url().optional(),
   LLM_PROVIDER: z.enum(["disabled", "openai", "anthropic", "inception", "groq", "mock"]).default("disabled"),
   LLM_MODEL: z.string().min(1).default("gpt-4o-mini"),
   EMBEDDING_PROVIDER: z.enum(["disabled", "mistral"]).default("mistral"),
@@ -24,7 +26,6 @@ const envSchema = z.object({
   PRESIDIO_URL: z.string().url().default("http://127.0.0.1:5002"),
   PRESIDIO_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(60_000),
   PRESIDIO_API_TOKEN: z.string().min(32).optional(),
-  FILE_STORAGE_DIR: z.string().min(1).default(".data/uploads"),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().max(25 * 1024 * 1024).default(5 * 1024 * 1024),
   MAX_EXTRACTED_TEXT_CHARS: z.coerce.number().int().positive().max(1_000_000).default(200_000),
   MAX_PDF_PAGES: z.coerce.number().int().positive().max(500).default(100),
@@ -40,6 +41,15 @@ export type AppConfig = z.infer<typeof envSchema>;
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.parse(source);
+  if (parsed.NODE_ENV !== "test" && isLocalMongoUri(parsed.MONGODB_URI)) {
+    throw new Error("MONGODB_URI must point to a remote MongoDB deployment outside tests");
+  }
+  if (parsed.NODE_ENV !== "test" && !parsed.POSTGRES_URL) {
+    throw new Error("POSTGRES_URL is required for audit log storage outside tests");
+  }
+  if (parsed.NODE_ENV !== "test" && parsed.POSTGRES_URL && isLocalPostgresUrl(parsed.POSTGRES_URL)) {
+    throw new Error("POSTGRES_URL must point to a remote PostgreSQL deployment outside tests");
+  }
   if (parsed.LLM_PROVIDER === "openai" && !parsed.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required when LLM_PROVIDER=openai");
   }
@@ -59,6 +69,24 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error("LLM_PROVIDER=mock is only allowed in test environments");
   }
   return parsed;
+}
+
+function isLocalMongoUri(uri: string): boolean {
+  try {
+    const hostname = new URL(uri).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function isLocalPostgresUrl(uri: string): boolean {
+  try {
+    const hostname = new URL(uri).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
 }
 
 export const env = loadEnv();

@@ -1,6 +1,6 @@
 # AI Resume and Interview Coach
 
-The core backend is implemented for authentication, secure intake, consent, AI preparation workflows, human review, and interview practice. For now, application data is persisted to a local JSON file; MongoDB is a planned later migration. Semantic resume-to-job retrieval uses Mistral embeddings and local cosine ranking. JSON persistence and in-memory graph checkpoints are intended for single-process development only, not production.
+The core backend is implemented for authentication, secure intake, consent, AI preparation workflows, human review, and interview practice. Application records and uploaded source files are stored in the configured remote MongoDB deployment; upload binaries use GridFS. Semantic resume-to-job retrieval uses Mistral embeddings and local cosine ranking. Graph checkpoints remain in process memory.
 
 ## Project documentation
 
@@ -20,12 +20,13 @@ The core backend is implemented for authentication, secure intake, consent, AI p
 ## Requirements
 
 - Node.js 20.19 or newer and npm
+- A hosted MongoDB deployment (including Atlas) with GridFS enabled
 - Python 3.13 for the Presidio service
 
 ## Local development
 
 1. Copy `.env.example` to `.env`, set `JWT_SECRET` and `PRESIDIO_API_TOKEN` to random values of at least 32 characters, and provide `INCEPTION_API_KEY`, `GROQ_API_KEY`, and `MISTRAL_API_KEY`. `EMBEDDING_PROVIDER=mistral` enables semantic matching. The configured `inception` provider uses Mercury 3 first and falls back to Groq's `openai/gpt-oss-120b` on network failures, timeouts, HTTP 410/429, or 5xx responses. To migrate to Groq before Inception's shutdown, set `LLM_PROVIDER=groq`; the app then uses `GROQ_MODEL`. Set `LLM_PROVIDER=disabled` to disable AI workflows. OpenAI API usage is billed separately from ChatGPT and is not enabled by this configuration. The Inception Mercury API is scheduled to stop serving requests after December 28, 2026; migrate before then. External processing also requires the candidate's `external_model_processing` consent. Only Presidio-processed resume text is sent to Mistral for embeddings. The `mock` provider is reserved for tests.
-2. The backend creates `.data/ai-coach.json` automatically. Set `JSON_DB_PATH` to change its location. Keep this file and its backups private: it contains candidate information and is not encrypted. Run only one API process against a JSON data file. This temporary store does not provide production-grade concurrency, durability, or database protections.
+2. Set `MONGODB_URI` to your hosted MongoDB connection string, `MONGODB_DB_NAME`, and `POSTGRES_URL` to your hosted PostgreSQL connection string in `.env`. The API requires both remote databases and connects to them before listening. Structured app records and uploaded files are stored in MongoDB/GridFS; audit events are written to PostgreSQL's `audit_logs` table. The admin audit-log view reads from PostgreSQL and resolves actor/subject emails from MongoDB.
 3. Create and install the Presidio Python virtual environment:
 
    ```powershell
@@ -56,21 +57,68 @@ The core backend is implemented for authentication, secure intake, consent, AI p
    npm run dev
    ```
 
-7. Open `http://localhost:3000/`, sign in, review the privacy notice, and accept the current consent before uploading a CV. Consent is stored against the authenticated account in the JSON file; the upload endpoint independently checks it. The Vite development server proxies API requests to `http://localhost:4000`.
+7. Open `http://localhost:3000/`, sign in, review the privacy notice, and accept the current consent before uploading a CV. Consent is stored in MongoDB against the authenticated account; the upload endpoint independently checks it. The Vite development server proxies API requests to `http://localhost:4000`.
 
-The API opens the JSON file before it starts listening. Startup fails with a logged error if the data file is unreadable or a required provider configuration is unavailable. Resume AI workflows send extracted text to the local Presidio service first; if that service is unavailable or returns an invalid response, the workflow fails without sending CV text to an AI model.
+The API connects to the configured MongoDB and PostgreSQL deployments before it starts listening; startup fails if either database is unavailable. It does not use a local JSON database or local upload directory at runtime. Resume AI workflows send extracted text to the local Presidio service first; if that service is unavailable or returns an invalid response, the workflow fails without sending CV text to an AI model.
 
-Resume evidence chunks and Mistral vectors are stored in the JSON data file and ranked locally using cosine similarity, scoped to the selected owner and resume. LangGraph checkpoints remain in process memory and are lost when the API restarts.
+Resume evidence chunks and Mistral vectors are stored in MongoDB and ranked locally using cosine similarity, scoped to the selected owner and resume. LangGraph checkpoints remain in process memory and are lost when the API restarts.
+
+To migrate an existing JSON store, build the backend, then run a dry-run first from `backend`:
+
+```powershell
+npm run migrate:json-to-mongodb -- --source ".data/ai-coach.json"
+npm run migrate:json-to-mongodb -- --source ".data/ai-coach.json" --merge --apply
+```
+
+The migration leaves the source file unchanged. Use `--merge` when the hosted database already contains records; existing records with the same `_id` are skipped. Conflicting user emails with different IDs stop the import so account references are not silently changed. The source JSON file is never deleted automatically.
+
+After the JSON records are copied, copy referenced legacy uploads into GridFS:
+
+```powershell
+npm run migrate:uploads-to-gridfs -- --source-dir ".data/uploads"
+npm run migrate:uploads-to-gridfs -- --source-dir ".data/uploads" --apply
+```
+
+Both migration scripts default to dry-run. Upload migration only copies files and is safe to rerun; it never deletes local files. Verify destination users, resume records, and uploaded files before removing the local JSON file or upload directory. Keep a backup until the remote data has been checked.
+
+Audit events created after deployment are stored in PostgreSQL. To move historical audit entries currently in MongoDB, run the MongoDB-to-PostgreSQL command below with `--collection audit_logs` after the legacy JSON records have been imported into MongoDB. Existing MongoDB audit records are not deleted.
+
+If running in Docker, the legacy JSON and upload files must be made available at the specified paths through a secure temporary mount; do not add them to the image. Run both migration commands while the API is stopped:
+
+```powershell
+docker compose stop api
+docker compose run --rm api npm run migrate:json-to-mongodb -- --source /app/.data/ai-coach.json --merge
+docker compose run --rm api npm run migrate:json-to-mongodb -- --source /app/.data/ai-coach.json --merge --apply
+docker compose run --rm api npm run migrate:uploads-to-gridfs -- --source-dir /app/.data/uploads
+docker compose run --rm api npm run migrate:uploads-to-gridfs -- --source-dir /app/.data/uploads --apply
+docker compose up -d api
+```
+
+### MongoDB to PostgreSQL data copy
+
+The backend uses MongoDB for application data and PostgreSQL for audit logs. This script optionally copies MongoDB collections to PostgreSQL; that copy does not switch other runtime data to PostgreSQL. Set `POSTGRES_URL` in `.env`, verify `MONGODB_URI` and `MONGODB_DB_NAME` point to the source database, then run from `backend`:
+
+```powershell
+npm run build
+npm run migrate:mongodb-to-postgres
+npm run migrate:mongodb-to-postgres -- --apply
+npm run migrate:mongodb-to-postgres -- --collection audit_logs
+npm run migrate:mongodb-to-postgres -- --collection audit_logs --apply
+```
+
+The default is a dry run. Use `--collection audit_logs` to copy only existing audit events. The script creates one PostgreSQL table per selected Mongo collection and maps top-level fields to typed SQL columns (`ObjectId` references become text); nested objects and arrays are stored as JSONB. Without a collection selector, it copies all collections except `resume_vector_chunks` (kept in MongoDB for vector search) and `interview_answers` (raw candidate answers are not copied). PostgreSQL rows retain the Mongo `_id` as `mongo_id`. Existing rows with the same `mongo_id` are left unchanged, so re-running the copy is safe; source MongoDB data is never updated or deleted. Resume metadata and parsed/structured resume records are copied; GridFS upload binaries remain in MongoDB.
+
+The dry run reports collection counts and counts of users by role without printing user content. If candidate or coach accounts are missing from the selected MongoDB database, the script warns but cannot recreate accounts that are not present in the source. Verify the source database and dry-run report before applying. Because interview answers are omitted, copied interview sessions may retain answer ID references with no corresponding answer rows. The migration does not stop the running application from writing answers to MongoDB.
 
 ## Docker Compose
 
-Copy `.env.example` to `.env`, replace `JWT_SECRET` and `PRESIDIO_API_TOKEN` with random secrets, add the selected LLM keys and `MISTRAL_API_KEY`, then run:
+Copy `.env.example` to `.env`, set hosted `MONGODB_URI`, `MONGODB_DB_NAME`, and `POSTGRES_URL`, replace `JWT_SECRET` and `PRESIDIO_API_TOKEN` with random secrets, add the selected LLM keys and `MISTRAL_API_KEY`, then run:
 
 ```powershell
 docker compose up --build
 ```
 
-Open the frontend at `http://localhost:3000`; the frontend web server proxies `/api` requests to the backend.
+Open the frontend at `http://localhost:3000`; the frontend web server proxies `/api` requests to the backend. Docker Compose connects the API to the hosted MongoDB and PostgreSQL deployments from `.env`; it does not start local databases or persist candidate data in a Compose volume.
 
 ## Implemented API routes
 
@@ -97,7 +145,7 @@ Run **API health**, **Register candidate**, then **Login candidate**. Login save
 
 To run **Start match analysis**, first upload a CV and create a job description while signed in as the same candidate. Alternatively, run **List resumes** and **List job descriptions** to copy the latest owned IDs into the collection variables. The `resumeId` and `jobDescriptionId` values must each be 24-character MongoDB ObjectIds.
 
-Resume uploads accept PDF/DOCX, validate file signatures and extract source text, then store the file in private local storage. Upload requires active resume-processing consent. Job descriptions accept pasted text or PDF/DOCX/TXT uploads and create persisted analysis jobs. Parsing, matching, skill-gap analysis, factual resume suggestions, question generation, and interview evaluation use validated AI outputs and persisted job status. Matching scores are calculated in code; uncertain or flagged results can be sent for human review. Candidate data endpoints are owner-scoped, and interview/review workflow state is checkpointed without storing answer bodies in graph state.
+Resume uploads accept PDF/DOCX, validate file signatures and extract source text, then store the file in the private MongoDB GridFS bucket. Upload requires active resume-processing consent. Job descriptions accept pasted text or PDF/DOCX/TXT uploads and create persisted analysis jobs. Parsing, matching, skill-gap analysis, factual resume suggestions, question generation, and interview evaluation use validated AI outputs and persisted job status. Matching scores are calculated in code; uncertain or flagged results can be sent for human review. Candidate data endpoints are owner-scoped, and interview/review workflow state is checkpointed without storing answer bodies in graph state.
 
 The consent and upload interface is a React + TypeScript SPA in `frontend/`. Candidates separately consent to CV processing and sending only the Presidio-processed text to an external model. Consent policy versions are controlled by the server, and each grant or withdrawal creates a new history record. The updated policies require renewed consent; the application does not claim POPIA compliance.
 
@@ -120,7 +168,7 @@ Remove-Item Env:\DEMO_ADMIN_PASSWORD
 Remove-Variable securePassword
 ```
 
-Use the email and password you entered to sign in as admin. In the admin workspace, manage account status, directly register new coaches, and view audit activity. Candidate accounts cannot be promoted to coach; register coaches directly. Deactivated candidates and coaches cannot sign in or use existing access tokens. Admin accounts require controlled provisioning. The bootstrap command is for the local JSON database only; never use demo credentials in production.
+Use the email and password you entered to sign in as admin. In the admin workspace, manage account status, directly register new coaches, and view audit activity. Candidate accounts cannot be promoted to coach; register coaches directly. Deactivated candidates and coaches cannot sign in or use existing access tokens. Admin accounts require controlled provisioning. The bootstrap command is for local development only; never use demo credentials in production.
 
 ## Validation
 
@@ -130,6 +178,8 @@ npm install
 npm test
 npm run build
 ```
+
+The phase 4/5 integration tests require MongoDB at `MONGODB_TEST_URI` or the default `mongodb://127.0.0.1:27017`; they use isolated, randomly named databases and remove them after each suite.
 
 ```powershell
 Set-Location frontend
