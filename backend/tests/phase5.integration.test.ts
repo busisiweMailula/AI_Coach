@@ -98,6 +98,19 @@ afterAll(async () => {
 });
 
 describe("Phase 5 AI workflows", () => {
+  it("rejects malformed resume optimization IDs with validation details", async () => {
+    const response = await request(app)
+      .post("/api/v1/resumes/optimize")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        resumeId: "not-an-object-id",
+        jobDescriptionId: "also-invalid",
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("VALIDATION_ERROR");
+    expect(response.body.error.details).toBeTruthy();
+  });
   it("runs resume and job-description agents and exposes persisted parse status", async () => {
     await grantResumeConsent();
     const upload = await request(app)

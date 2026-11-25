@@ -742,6 +742,14 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
     setDraft(null);
     setGenerationComplete(false);
     setNotice(null);
+    if (!selectedResumeId || !/^[\da-f]{24}$/i.test(selectedResumeId)) {
+      setNotice({ text: "Select a valid CV before generating suggestions.", error: true });
+      return;
+    }
+    if (!jobId || !/^[\da-f]{24}$/i.test(jobId)) {
+      setNotice({ text: "Select a valid job description before generating suggestions.", error: true });
+      return;
+    }
     if (!selectedResumeId || !jobId) {
       setNotice({ text: "Select a CV in Resume & role and choose a job description.", error: true });
       return;
@@ -1555,7 +1563,7 @@ function SpeechControls({
 
 function evaluationSpeechText(evaluations: InterviewEvaluation[]) {
   return evaluations.map((evaluation) => [
-    `Overall score: ${evaluation.overallScore} percent.`,
+    `Overall score: ${formatScore(evaluation.overallScore)} percent.`,
     `Strengths: ${evaluation.strengths.join(". ") || "No specific strengths recorded."}.`,
     `Improvement areas and next steps: ${evaluation.improvements.join(". ") || "No specific improvement areas recorded."}.`,
     evaluation.exampleAnswer ? `Example answer: ${evaluation.exampleAnswer}` : "",
@@ -1564,6 +1572,11 @@ function evaluationSpeechText(evaluations: InterviewEvaluation[]) {
 
 function joinAnswerText(...parts: string[]) {
   return parts.map((part) => part.trim()).filter(Boolean).join(" ");
+}
+
+function formatScore(value: number): string {
+  if (!Number.isFinite(value)) return "0.00";
+  return value.toFixed(2);
 }
 
 function interviewQuestionTypeLabel(type?: InterviewQuestion["type"]) {
@@ -1599,7 +1612,7 @@ function EvaluationReport({
       </div>
       {evaluations.map((evaluation, index) => (
         <article key={evaluation.rubricVersion + index}>
-          <h3>Overall score: {evaluation.overallScore}%</h3>
+          <h3>Overall score: {formatScore(evaluation.overallScore)}%</h3>
           <p className="supporting-copy">
             AI confidence: {Math.round(evaluation.confidence * 100)}% · Review status: {evaluation.reviewStatus.replaceAll("_", " ")}
           </p>
@@ -1608,7 +1621,7 @@ function EvaluationReport({
             {evaluation.dimensionFeedback.map((dimension) => (
               <div key={dimension.dimension}>
                 <span>{dimension.dimension}</span>
-                <strong>{dimension.score}/4</strong>
+                <strong>{formatScore(dimension.score)}/4</strong>
                 <small>{dimension.feedback}</small>
               </div>
             ))}
@@ -1647,6 +1660,19 @@ function delay(milliseconds: number) {
 }
 
 function errorMessage(error: unknown) {
-  if (error instanceof ApiError) return error.message;
+  if (error instanceof ApiError) {
+    if (typeof error.details === "object" && error.details !== null) {
+      const details = error.details as {
+        formErrors?: string[];
+        fieldErrors?: Record<string, string[]>;
+      };
+      const fieldError = Object.values(details.fieldErrors ?? {})
+        .flat()
+        .find((message) => message.trim().length > 0);
+      if (fieldError) return fieldError;
+      if (details.formErrors?.length) return details.formErrors[0];
+    }
+    return error.message;
+  }
   return error instanceof Error ? error.message : "The request could not be completed.";
 }

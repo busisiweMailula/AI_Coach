@@ -13,6 +13,11 @@ interface CoachReviewPageProps {
   token: string;
 }
 
+function formatScore(value: number): string {
+  if (!Number.isFinite(value)) return "0.00";
+  return value.toFixed(2);
+}
+
 export default function CoachReviewPage({ token }: CoachReviewPageProps) {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -227,11 +232,11 @@ function ReviewTarget({ target }: { target: CoachReviewDetails["target"] }) {
   }
   return (
     <div className="review-content">
-      <p><strong>Overall score:</strong> {target.overallScore}%</p>
+      <p><strong>Overall score:</strong> {formatScore(target.overallScore)}%</p>
       <h3>Evaluation</h3>
       <ul>
         {target.dimensions.map((dimension) => (
-          <li key={dimension.dimension}><strong>{dimension.dimension} ({dimension.score}/4):</strong> {dimension.feedback}</li>
+          <li key={dimension.dimension}><strong>{dimension.dimension} ({formatScore(dimension.score)}/4):</strong> {dimension.feedback}</li>
         ))}
       </ul>
       <h3>Interview answers</h3>

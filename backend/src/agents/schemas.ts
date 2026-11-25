@@ -71,7 +71,7 @@ export const QuestionsSchema = z.object({
 export const AnswerEvaluationSchema = z.object({
   dimensions: z.array(z.object({
     dimension: z.enum(["relevance", "completeness", "reasoning", "examples", "communication"]),
-    score: z.number().int().min(0).max(4),
+    score: z.number().finite().min(0).max(4),
     feedback: z.string().min(1).max(1000),
   })).length(5),
   strengths: z.array(z.string().max(500)).max(20),

@@ -315,6 +315,15 @@ function readZipEntry(buffer: Buffer, entryName: string, optional = false): Prom
       }
       zipFile.on("error", () => reject(new ValidationError("DOCX archive is malformed")));
       let found = false;
+      let settled = false;
+      zipFile.on("end", () => {
+        if (settled) return;
+        settled = true;
+        if (!found) {
+          if (optional) resolve("");
+          else reject(new ValidationError("DOCX document XML is missing"));
+        }
+      });
       zipFile.on("entry", (entry: Entry) => {
         if (entry.fileName.replace(/\\/g, "/") !== entryName) {
           zipFile.readEntry();
@@ -335,15 +344,9 @@ function readZipEntry(buffer: Buffer, entryName: string, optional = false): Prom
           });
           stream.on("end", () => {
             zipFile.close();
+            settled = true;
             resolve(Buffer.concat(chunks).toString("utf8"));
           });
-        });
-        zipFile.on("end", () => {
-          if (!found) {
-            zipFile.close();
-            if (optional) resolve("");
-            else reject(new ValidationError("DOCX document XML is missing"));
-          }
         });
       });
       zipFile.readEntry();

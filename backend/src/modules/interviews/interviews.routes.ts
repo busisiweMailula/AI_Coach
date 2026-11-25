@@ -10,6 +10,7 @@ import { getLlmProvider } from "../../infra/llm/provider-factory.js";
 import { getDb } from "../../infra/db/database.js";
 import { authMiddleware, requireRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
+import { roundToTwoDecimalPlaces } from "../../common/rounding.js";
 import type {
   InterviewAnswerDocument,
   InterviewEvaluationDocument,
@@ -297,9 +298,15 @@ function evaluationResponse(
 ) {
   return {
     rubricVersion: evaluation.rubricVersion,
-    scores: Object.fromEntries(evaluation.dimensions.map((item) => [item.dimension, item.score])),
-    dimensionFeedback: evaluation.dimensions,
-    overallScore: evaluation.overallScore,
+    scores: Object.fromEntries(evaluation.dimensions.map((item) => [
+      item.dimension,
+      roundToTwoDecimalPlaces(item.score),
+    ])),
+    dimensionFeedback: evaluation.dimensions.map((item) => ({
+      ...item,
+      score: roundToTwoDecimalPlaces(item.score),
+    })),
+    overallScore: roundToTwoDecimalPlaces(evaluation.overallScore),
     strengths: evaluation.strengths,
     improvements: evaluation.improvements,
     exampleAnswer: evaluation.exampleAnswer,
