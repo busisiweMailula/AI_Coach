@@ -103,9 +103,9 @@ export default function DashboardLayout({
   ];
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-[#0a1c30] text-slate-300 select-none">
+    <div className="flex flex-col h-full bg-[linear-gradient(138deg,#293e80_0%,#3d559c_54%,#6272b8_100%)] text-slate-300 select-none">
       {/* Brand header */}
-      <div className="p-6 border-b border-[#183654] flex items-center justify-between">
+      <div className="p-6 border-b border-white/15 flex items-center justify-between">
         <Link
           to="/coach"
           className="flex items-center gap-3 no-underline text-white font-bold text-xl tracking-tight focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded-lg p-1"
@@ -122,7 +122,7 @@ export default function DashboardLayout({
         {mobileMenuOpen && (
           <button
             type="button"
-            className="md:hidden p-2 text-slate-400 hover:text-white rounded-lg hover:bg-[#183654]"
+            className="md:hidden p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10"
             onClick={() => setMobileMenuOpen(false)}
             aria-label="Close navigation"
           >
@@ -145,8 +145,8 @@ export default function DashboardLayout({
               to={item.to}
               className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 isActive
-                  ? "bg-[#183654] text-white font-semibold shadow-sm border border-blue-500/30"
-                  : "text-slate-300 hover:bg-[#132a42] hover:text-white"
+                  ? "bg-white/10 text-white font-semibold shadow-sm border border-white/20"
+                  : "text-slate-300 hover:bg-white/5 hover:text-white"
               }`}
               aria-current={isActive ? "page" : undefined}
             >
@@ -168,7 +168,7 @@ export default function DashboardLayout({
       </nav>
 
       {/* Bottom coach account card */}
-      <div className="p-4 border-t border-[#183654] bg-[#071524]">
+      <div className="p-4 border-t border-white/15">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-700 to-indigo-600 text-white flex items-center justify-center font-bold text-xs uppercase flex-shrink-0">
@@ -181,7 +181,7 @@ export default function DashboardLayout({
           </div>
           <button
             type="button"
-            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-[#183654] rounded-lg transition-colors flex-shrink-0"
+            className="p-2 text-slate-300 hover:text-rose-300 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0"
             onClick={onSignOut}
             title="Sign out"
             aria-label="Sign out"
@@ -194,9 +194,9 @@ export default function DashboardLayout({
   );
 
   return (
-    <div className="min-h-screen bg-[#0f2a44] text-slate-100 flex flex-col md:flex-row antialiased">
+    <div className="min-h-screen bg-[linear-gradient(138deg,#293e80_0%,#3d559c_54%,#6272b8_100%)] text-slate-100 flex flex-col md:flex-row antialiased">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:block w-64 flex-shrink-0 border-r border-[#1e4168] h-screen sticky top-0 z-30">
+      <aside className="hidden md:block w-64 flex-shrink-0 border-r border-white/15 h-screen sticky top-0 z-30">
         {sidebarContent}
       </aside>
 
@@ -215,7 +215,7 @@ export default function DashboardLayout({
         role="dialog"
         aria-modal="true"
         aria-label="Navigation drawer"
-        className={`md:hidden fixed inset-y-0 left-0 w-72 max-w-[80vw] bg-[#0a1c30] z-50 shadow-2xl transform transition-transform duration-300 ease-in-out ${
+        className={`md:hidden fixed inset-y-0 left-0 w-72 max-w-[80vw] bg-[linear-gradient(138deg,#293e80_0%,#3d559c_54%,#6272b8_100%)] z-50 shadow-2xl transform transition-transform duration-300 ease-in-out ${
           mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -225,12 +225,12 @@ export default function DashboardLayout({
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <header className="h-16 border-b border-[#1e4168] bg-[#0c233a] flex items-center justify-between px-4 md:px-8 sticky top-0 z-20">
+        <header className="h-16 border-b border-white/15 bg-white/5 backdrop-blur flex items-center justify-between px-4 md:px-8 sticky top-0 z-20">
           <div className="flex items-center gap-3">
             <button
               ref={menuButtonRef}
               type="button"
-              className="md:hidden p-2 rounded-lg text-slate-300 hover:bg-[#183654] hover:text-white"
+              className="md:hidden p-2 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white"
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Open navigation menu"
               aria-expanded={mobileMenuOpen}
@@ -246,7 +246,7 @@ export default function DashboardLayout({
 
           <div className="flex items-center gap-4">
             <NotificationBell token={token} />
-            <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-[#1e4168]">
+            <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-white/15">
               <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase">
                 {displayName.slice(0, 1)}
               </div>
