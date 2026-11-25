@@ -7,8 +7,7 @@ import { asyncHandler } from "../../common/async-handler.js";
 import { getDb } from "../../infra/db/database.js";
 import { authMiddleware, requireCurrentRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
-import { recordAuditEvent } from "./audit-log.service.js";
-import type { AuditLogDocument } from "./audit-log.model.js";
+import { listAuditEvents, recordAuditEvent } from "./audit-log.service.js";
 import type { UserDocument, UserRole } from "./user.model.js";
 
 const statusSchema = z.object({
@@ -97,7 +96,7 @@ adminRouter.patch(
         ...(current.status ? { status: current.status } : { status: { $exists: false } }),
       },
       { $set: { status: req.body.status, updatedAt: new Date() } },
-      { returnDocument: "after" },
+      { returnDocument: "after", includeResultMetadata: false },
     );
     if (!updated) throw new ConflictError("The account status changed; reload the account list");
 
@@ -117,11 +116,7 @@ adminRouter.patch(
 adminRouter.get(
   "/audit-logs",
   asyncHandler(async (_req, res) => {
-    const entries = await getDb().collection<AuditLogDocument>("audit_logs")
-      .find({})
-      .sort({ createdAt: -1 })
-      .limit(250)
-      .toArray();
+    const entries = await listAuditEvents(250);
     const userIds = [...new Set(entries.flatMap((entry) => [
       entry.actorId?.toHexString(),
       (entry.ownerId ?? entry.targetId)?.toHexString(),

@@ -21,7 +21,7 @@
 ## File handling
 
 - Accept only PDF/DOCX resumes, apply a conservative size limit, and verify signatures/magic bytes in addition to extension/MIME metadata.
-- Store uploads under generated opaque keys, outside any public static directory.
+- Store uploads under generated opaque keys in the private MongoDB GridFS bucket, outside any public static directory.
 - Reject path traversal and archive expansion hazards; impose limits on extracted text and archive entries.
 - Keep original filenames only as sanitized display metadata.
 - Do not execute, render as active content, or serve uploaded files inline from the application origin.

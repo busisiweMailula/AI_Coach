@@ -17,14 +17,14 @@ modules/<domain>/
 - Routes apply authentication, role guards, and Zod validation.
 - Controllers are limited to HTTP mapping.
 - Services enforce ownership, invoke domain rules/agents, and coordinate persistence.
-- Repositories use the temporary JSON persistence adapter and always scope candidate data by `ownerId`; MongoDB will replace this adapter later.
+- Repositories use the shared MongoDB database connection and always scope candidate data by `ownerId`.
 - Domain functions are pure wherever practical.
 - Agents accept typed input and return schema-validated output; they have no database dependency.
 
 ## Persistence conventions
 
-- `ObjectId` is used for document IDs and references and is encoded as tagged JSON on disk.
-- Timestamps are BSON `Date` values in storage and ISO-8601 strings in JSON.
+- `ObjectId` is used for document IDs and references.
+- Timestamps are stored as BSON `Date` values and returned as ISO-8601 strings in API JSON.
 - Candidate-owned documents use `ownerId: ObjectId`.
 - Email values are normalized to lowercase and uniquely indexed.
 - API responses never expose password hashes, storage filesystem paths, secrets, or internal checkpoint contents.

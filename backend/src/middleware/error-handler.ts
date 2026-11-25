@@ -1,8 +1,8 @@
 import type { ErrorRequestHandler } from "express";
 import multer from "multer";
+import { MongoServerError } from "mongodb";
 import { AppError } from "../common/errors.js";
 import { logger } from "../config/logger.js";
-import { DuplicateKeyError } from "../infra/db/json-database.js";
 
 export const errorHandler: ErrorRequestHandler = (error: unknown, req, res, _next) => {
   if (res.headersSent) return;
@@ -25,7 +25,7 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, req, res, _nex
     return;
   }
 
-  if (error instanceof DuplicateKeyError) {
+  if (error instanceof MongoServerError && error.code === 11000) {
     res.status(409).json({
       success: false,
       error: { code: "CONFLICT", message: "A user with this email already exists" },

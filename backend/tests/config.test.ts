@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { loadEnv } from "../src/config/env.js";
 
 describe("environment configuration", () => {
-  it("uses validated defaults and parses numeric settings", () => {
+  it("requires a configured MongoDB URI and parses numeric settings", () => {
     const config = loadEnv({
       JWT_SECRET: "a-valid-test-secret-with-at-least-32-chars",
+      MONGODB_URI: "mongodb+srv://user:pass@cluster.example.net",
+      POSTGRES_URL: "postgresql://user:pass@postgres.example.net:5432/ai_coach",
       PORT: "4100",
       RATE_LIMIT_MAX_REQUESTS: "25",
       EMBEDDING_PROVIDER: "disabled",
@@ -12,17 +14,46 @@ describe("environment configuration", () => {
 
     expect(config.PORT).toBe(4100);
     expect(config.RATE_LIMIT_MAX_REQUESTS).toBe(25);
-    expect(config.JSON_DB_PATH).toBe(".data/ai-coach.json");
+    expect(config.MONGODB_URI).toBe("mongodb+srv://user:pass@cluster.example.net");
+    expect(config.MONGODB_DB_NAME).toBe("ai_coach");
     expect(config.PRESIDIO_URL).toBe("http://127.0.0.1:5002");
   });
 
+  it("rejects localhost MongoDB outside test mode", () => {
+    expect(() => loadEnv({
+      JWT_SECRET: "a-valid-test-secret-with-at-least-32-chars",
+      MONGODB_URI: "mongodb://127.0.0.1:27017",
+    })).toThrow("MONGODB_URI must point to a remote MongoDB deployment");
+  });
+
+  it("requires PostgreSQL for audit storage outside test mode", () => {
+    expect(() => loadEnv({
+      JWT_SECRET: "a-valid-test-secret-with-at-least-32-chars",
+      MONGODB_URI: "mongodb+srv://user:pass@cluster.example.net",
+    })).toThrow("POSTGRES_URL is required for audit log storage");
+  });
+
+  it("rejects localhost PostgreSQL outside test mode", () => {
+    expect(() => loadEnv({
+      JWT_SECRET: "a-valid-test-secret-with-at-least-32-chars",
+      MONGODB_URI: "mongodb+srv://user:pass@cluster.example.net",
+      POSTGRES_URL: "postgresql://user:pass@localhost:5432/ai_coach",
+    })).toThrow("POSTGRES_URL must point to a remote PostgreSQL deployment");
+  });
+
   it("rejects a weak JWT secret", () => {
-    expect(() => loadEnv({ JWT_SECRET: "too-short", EMBEDDING_PROVIDER: "disabled" })).toThrow();
+    expect(() => loadEnv({
+      JWT_SECRET: "too-short",
+      MONGODB_URI: "mongodb+srv://user:pass@cluster.example.net",
+      EMBEDDING_PROVIDER: "disabled",
+    })).toThrow();
   });
 
   it("requires both Inception and Groq keys for the configured fallback", () => {
     const base = {
       JWT_SECRET: "a-valid-test-secret-with-at-least-32-chars",
+      MONGODB_URI: "mongodb+srv://user:pass@cluster.example.net",
+      POSTGRES_URL: "postgresql://user:pass@postgres.example.net:5432/ai_coach",
       LLM_PROVIDER: "inception",
       EMBEDDING_PROVIDER: "disabled",
     };
@@ -40,6 +71,8 @@ describe("environment configuration", () => {
   it("allows the API to start without optional Mistral credentials", () => {
     const base = {
       JWT_SECRET: "a-valid-test-secret-with-at-least-32-chars",
+      MONGODB_URI: "mongodb+srv://user:pass@cluster.example.net",
+      POSTGRES_URL: "postgresql://user:pass@postgres.example.net:5432/ai_coach",
       EMBEDDING_PROVIDER: "mistral",
     };
 

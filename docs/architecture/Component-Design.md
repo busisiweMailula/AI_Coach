@@ -8,8 +8,8 @@
 | Routes/controllers | HTTP transport and status codes | Services, validators | Query the persistence adapter or call an LLM |
 | Application services | Use-case orchestration and ownership | Repositories, domain, agents, jobs | Leak cross-user data |
 | Domain | Score calculation, evidence and language rules, rubric aggregation | Pure typed inputs | Import Express, persistence, or provider SDKs |
-| Repositories | JSON-file persistence for now | JSON database adapter | Call agents or make authorization decisions without owner criteria |
-| Storage adapter | Private original/derived files | Filesystem or approved object storage | Serve uploads as public static files |
+| Repositories | MongoDB persistence | Shared MongoDB database connection | Call agents or make authorization decisions without owner criteria |
+| Storage adapter | Private original/derived files | MongoDB GridFS | Serve uploads as public static files |
 | Job runner | Queue/status/retry lifecycle | Services/agents, job repository | Treat transient failure as success |
 | Agent runtime | Prompt/provider/schema/execution lifecycle | `LlmProvider`, execution repository | Access domain repositories directly |
 | LLM provider adapter | Provider-specific request/response | Vendor SDK/API | Expose API keys to browser or log prompt secrets |

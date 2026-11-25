@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../common/errors.js";
 import { getDb } from "../../infra/db/database.js";
+import { recordAuditEvent } from "../users/audit-log.service.js";
 import { startReviewGraph, resumeReviewGraph } from "../../graphs/review-escalation.graph.js";
 import type {
   InterviewAnswerDocument,
@@ -332,13 +333,12 @@ export async function decideReview(input: {
         updatedAt: now,
       },
     },
-    { returnDocument: "after" },
+    { returnDocument: "after", includeResultMetadata: false },
   );
   if (!result) throw new ConflictError("Review item was decided by another coach");
 
   await updateTargetReviewStatus(result, parsed.data.editedText);
-  await getDb().collection("audit_logs").insertOne({
-    _id: new ObjectId(),
+  await recordAuditEvent({
     actorId: coachId,
     ownerId: result.ownerId,
     action: `review_${status}`,

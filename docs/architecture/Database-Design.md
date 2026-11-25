@@ -1,15 +1,16 @@
 # Database Design
 
-Status: The current implementation stores collection-shaped JSON in `.data/ai-coach.json`; MongoDB is a planned later migration. This local file store is temporary, single-process, unencrypted, and not suitable for production. Confirm retention periods and deployment-specific behavior before production.
+Status: Application records are stored in MongoDB using the native Node.js driver. Configure the connection with `MONGODB_URI` and `MONGODB_DB_NAME`. The Docker Compose MongoDB service is intended for local development; production deployments should use a secured MongoDB service and managed credentials.
 
 ## Conventions
 
-- Runtime IDs and references use `ObjectId`; timestamps use `Date`. The JSON file encodes these as tagged objects (`{"$oid":"..."}` and `{"$date":"..."}`) so they can be restored to their runtime types.
-- The file is a top-level object whose properties are collection names and whose values are arrays of documents. `JSON_DB_PATH` selects the file path.
+- Runtime IDs and references use BSON `ObjectId`; timestamps use BSON `Date`.
+- Collection indexes are created at startup. Unique indexes enforce email, idempotency, and other declared uniqueness constraints.
+- Existing JSON stores can be imported with `npm run migrate:json-to-mongodb`; the command defaults to a dry run and requires `--apply` to write. It refuses to import into a non-empty target database and does not modify the source file.
 - Candidate-owned documents carry `ownerId: ObjectId`; candidate-facing repository operations filter by both `_id` and `ownerId`.
 - Application enums are validated at the service boundary and stored as strings.
 - Optional values are omitted or explicitly `null` consistently within a collection.
-- `sourceText`, resumes, answer bodies, and provider inputs are sensitive personal data. The current JSON file is not encrypted; restrict access to the file and backups, and exclude sensitive values from logs.
+- `sourceText`, resumes, answer bodies, and provider inputs are sensitive personal data. Restrict database access, secure backups, and exclude sensitive values from logs.
 - TTL values below are proposed defaults, not legal retention advice. User deletion cascades to owned content and files. Audit retention is separately justified and never retains raw candidate content.
 - Resume-processing consent is versioned by the server and stored as append-only records. Upload and CV-based AI jobs require a current grant. CV text is sent to the private Presidio service before model processing; jobs fail closed if anonymization fails, and only the service's returned text may be sent to a model. Presidio detection is not guaranteed to find all personal information.
 
@@ -288,22 +289,15 @@ Sample:
 
 Retention: proposed 90-day operational retention, subject to security and instructor review.
 
-### `audit_logs`
+### PostgreSQL `audit_logs`
 
-Append-only record of security/privacy-sensitive actions.
+Append-only PostgreSQL table for security/privacy-sensitive actions. Application data remains in MongoDB; audit events are written directly to this table.
 
-Fields: `_id:ObjectId`; `actorUserId:ObjectId|null`; `actorRole:string|null`; `action:string`; `resourceType:string`; `resourceId:ObjectId|string|null`; `ownerId:ObjectId|null`; `reason:string|null`; `requestId:string`; `metadata:object` (allow-listed and redacted); `createdAt:Date`.
+Columns: `mongo_id:TEXT PRIMARY KEY`; `actor_id:TEXT|null`; `target_id:TEXT|null`; `owner_id:TEXT|null`; `action:TEXT`; `target_type:TEXT|null`; `previous_role:TEXT|null`; `new_role:TEXT|null`; `previous_status:TEXT|null`; `new_status:TEXT|null`; `request_id:TEXT|null`; `reason:TEXT|null`; `created_at:TIMESTAMPTZ`.
 
-Indexes: `{createdAt:-1}`; `{actorUserId:1,createdAt:-1}`; `{ownerId:1,createdAt:-1}`; `{resourceType:1,resourceId:1}`.
+Indexes: `{created_at DESC}`.
 
-Ownership/access: restricted security/audit access; administrators see metadata, never raw candidate content.
-
-Sample:
-```json
-{ "_id": { "$oid": "6650000000000000000000a0" }, "actorUserId": { "$oid": "665000000000000000000001" }, "actorRole": "candidate", "action": "resume.uploaded", "resourceType": "resume", "resourceId": { "$oid": "665000000000000000000010" }, "ownerId": { "$oid": "665000000000000000000001" }, "reason": null, "requestId": "request-id", "metadata": { "contentType": "application/pdf", "sizeBytes": 42810 }, "createdAt": { "$date": "2026-01-01T10:05:00Z" } }
-```
-
-Retention: proposed 1 year, subject to policy/legal confirmation; avoid payload/content retention.
+Ownership/access: restricted to the administrator audit endpoint. Actor and subject email addresses are resolved from MongoDB at read time; raw candidate content is not stored in audit records.
 
 ### `review_items`
 
@@ -364,7 +358,7 @@ Retention: delete when the linked workflow is terminal and its approved retentio
 - `interview_sessions` references `job_descriptions` and ordered `interview_questions`; `interview_answers` reference session/question; `interview_evaluations` reference answer/session.
 - `candidate_progress` is derived from completed interviews and evaluations.
 - `review_items.targetType/targetId` references a supported result; `jobs.resultType/resultId` is a typed result reference.
-- `agent_executions` records AI execution metadata; `audit_logs` records security/privacy actions.
+- `agent_executions` records AI execution metadata in MongoDB; PostgreSQL `audit_logs` records security/privacy actions.
 
 ## Retention and deletion policy
 

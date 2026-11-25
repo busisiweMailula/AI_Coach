@@ -1,17 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import type { Express } from "express";
 import JSZip from "jszip";
 import { ObjectId } from "mongodb";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-const storageRoot = path.join(os.tmpdir(), `ai-coach-phase4-${randomUUID()}`);
-const databasePath = path.join(os.tmpdir(), `ai-coach-phase4-${randomUUID()}.json`);
 let app: Express;
-let database: import("../src/infra/db/json-database.js").JsonDatabase;
+let database: import("mongodb").Db;
 let candidateToken: string;
 let otherCandidateToken: string;
 let connectDatabase: typeof import("../src/infra/db/database.js").connectDatabase;
@@ -21,8 +16,8 @@ let signAccessToken: typeof import("../src/middleware/auth.js").signAccessToken;
 let bootstrapDemoAdmin: typeof import("../src/modules/users/demo-admin-bootstrap.js").bootstrapDemoAdmin;
 
 beforeAll(async () => {
-  process.env.JSON_DB_PATH = databasePath;
-  process.env.FILE_STORAGE_DIR = storageRoot;
+  process.env.MONGODB_URI = process.env.MONGODB_TEST_URI ?? "mongodb://127.0.0.1:27017";
+  process.env.MONGODB_DB_NAME = `ai_coach_test_phase4_${randomUUID().replace(/-/g, "")}`;
   process.env.MAX_UPLOAD_BYTES = "2048";
 
   const [databaseModule, indexModule, appModule, authModule, bootstrapModule] = await Promise.all([
@@ -55,13 +50,11 @@ beforeAll(async () => {
 beforeEach(async () => {
   await database.dropDatabase();
   await ensureIndexes();
-  await rm(storageRoot, { recursive: true, force: true });
 });
 
 afterAll(async () => {
+  if (database) await database.dropDatabase();
   await closeDatabase();
-  await rm(storageRoot, { recursive: true, force: true });
-  await rm(databasePath, { force: true });
 });
 
 describe("Phase 4 intake APIs", () => {
