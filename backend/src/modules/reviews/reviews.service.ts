@@ -30,6 +30,7 @@ const reviewDecisionSchema = z.object({
   decision: z.enum(["approve", "modify", "edit", "reject"]),
   reason: z.string().trim().min(1).max(2000),
   modifiedOutput: z.string().trim().min(1).max(5000).optional(),
+  coachFeedback: z.string().trim().min(1).max(5000).optional(),
   editedText: z.string().trim().min(1).max(5000).optional(),
   recommendations: z.array(z.string().trim().min(1).max(300)).max(8).default([]),
   internalNote: z.string().trim().max(2000).optional(),
@@ -101,6 +102,7 @@ export async function createReviewItem(input: {
     originalOutput: null,
     recommendations: [],
     internalNote: null,
+    coachFeedback: null,
     decidedBy: null,
     decidedAt: null,
     createdAt: now,
@@ -149,7 +151,15 @@ export async function requestReview(input: {
     targetId,
     status: { $in: ["pending_review", "in_review"] },
   });
-  if (existing) throw new ConflictError("A review is already pending for this item");
+  if (existing) {
+    const updated = await getDb().collection<ReviewItemDocument>("review_items").findOneAndUpdate(
+      { _id: existing._id, status: { $in: ["pending_review", "in_review"] } },
+      { $set: { requestReason: input.reason, updatedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+    if (!updated) throw new ConflictError("Review item is no longer pending");
+    return updated;
+  }
   const created = await createReviewItem({
     ownerId,
     targetType: input.targetType,
@@ -210,6 +220,15 @@ export async function listPendingReviews(coachId: string, options: ReviewQueueOp
     pageSize: options.pageSize,
     nextPage: start + options.pageSize < rows.length ? options.page + 1 : null,
   };
+}
+
+export async function listCandidateReviews(ownerId: string): Promise<ReviewItemDocument[]> {
+  return getDb()
+    .collection<ReviewItemDocument>("review_items")
+    .find({ ownerId: new ObjectId(ownerId) })
+    .sort({ createdAt: -1 })
+    .limit(50)
+    .toArray();
 }
 
 export async function getReviewItem(
@@ -393,6 +412,7 @@ export async function decideReview(input: {
       $set: {
         status,
         decisionReason: parsed.data.reason,
+        coachFeedback: parsed.data.coachFeedback ?? null,
         decisionText: modifiedOutput ?? null,
         modifiedOutput: decision === "modify" ? modifiedOutput ?? null : null,
         originalOutput,
@@ -490,6 +510,8 @@ export function toReviewResponse(item: ReviewItemDocument) {
     recommendations: item.recommendations ?? [],
     decidedBy: item.decidedBy?.toHexString() ?? null,
     decidedAt: item.decidedAt?.toISOString() ?? null,
+    coachFeedback: item.coachFeedback ?? null,
+    videoUrl: item.videoKey ? `/api/v1/reviews/video/${encodeURIComponent(item.videoKey)}` : null,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
   };
@@ -709,13 +731,6 @@ export async function withdrawPendingReviews(ownerId: string): Promise<void> {
   }
 }
 
-export async function listCandidateReviews(ownerId: string) {
-  const items = await getDb().collection<ReviewItemDocument>("review_items")
-    .find({ ownerId: new ObjectId(ownerId), status: { $in: ["approved", "edited", "rejected"] } })
-    .sort({ decidedAt: -1 })
-    .toArray();
-  return items.map(toReviewResponse);
-}
 
 export async function getCandidateReviewDetails(reviewId: string, ownerId: string) {
   const item = await getReviewItem(reviewId, ownerId, "candidate");

@@ -85,6 +85,9 @@ export interface ReviewItem {
   resumeName?: string | null;
   flagReasons?: string[];
   waitingSeconds?: number;
+  /** Written coaching feedback sent back to the candidate after the coach reviews. */
+  coachFeedback: string | null;
+  videoUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -392,6 +395,7 @@ export interface InterviewAnswerResponse {
 }
 
 export interface InterviewEvaluation {
+  id?: string;
   rubricVersion: string;
   scores: Record<string, number>;
   dimensionFeedback: Array<{ dimension: string; score: number; feedback: string }>;
@@ -693,7 +697,7 @@ export function evaluateInterview(token: string, sessionId: string): Promise<Acc
 export function getInterviewResults(
   token: string,
   sessionId: string,
-): Promise<{ sessionId: string; status: string; evaluations: InterviewEvaluation[]; reviewStatus: string }> {
+): Promise<{ sessionId: string; status: string; evaluations: InterviewEvaluation[]; reviewStatus: string; reviewId: string | null }> {
   return request(`/api/v1/interviews/${encodeURIComponent(sessionId)}/results`, { token });
 }
 
@@ -707,8 +711,51 @@ export function getPendingReviews(token: string, query: {
   return request(`/api/v1/reviews/pending?${params}`, { token });
 }
 
+export function requestReview(
+  token: string,
+  targetType: "job_match" | "resume_suggestion" | "interview_evaluation",
+  targetId: string,
+  reason: string,
+): Promise<ReviewItem> {
+  return request("/api/v1/reviews/request", {
+    token,
+    method: "POST",
+    body: JSON.stringify({ targetType, targetId, reason }),
+  });
+}
+
+export function uploadInterviewVideo(
+  token: string,
+  sessionId: string,
+  videoBlob: Blob,
+  fileExtension: string,
+): Promise<{ videoUrl: string }> {
+  const form = new FormData();
+  form.append("video", videoBlob, `recording.${fileExtension}`);
+  return request(`/api/v1/interviews/${encodeURIComponent(sessionId)}/video`, {
+    token,
+    method: "POST",
+    body: form,
+  });
+}
+
 export function getCoachReviewDetails(token: string, reviewId: string): Promise<CoachReviewDetails> {
   return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}`, { token });
+}
+
+export async function getCoachReviewVideo(token: string, videoUrl: string): Promise<Blob> {
+  const response = await fetch(videoUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as ApiEnvelope<unknown> & ApiErrorPayload | null;
+    throw new ApiError(
+      payload?.error?.message ?? "The candidate video could not be loaded.",
+      response.status,
+      payload?.error?.code,
+    );
+  }
+  return response.blob();
 }
 
 export function decideReview(
@@ -716,7 +763,13 @@ export function decideReview(
   reviewId: string,
   decision: "approve" | "modify" | "reject",
   reason: string,
-  options: { modifiedOutput?: string; recommendations?: string[]; internalNote?: string } = {},
+  options: {
+    modifiedOutput?: string;
+    editedText?: string;
+    recommendations?: string[];
+    internalNote?: string;
+    coachFeedback?: string;
+  } = {},
 ): Promise<ReviewItem> {
   return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}/decision`, {
     token,
@@ -936,6 +989,15 @@ export function markNotificationRead(token: string, id: string): Promise<Notific
 
 export function markAllNotificationsRead(token: string): Promise<{ modifiedCount: number }> {
   return request("/api/v1/notifications/read-all", { token, method: "POST" });
+}
+/** Candidate polls their own review items to check for coach feedback. */
+export function getCandidateReviews(token: string): Promise<{ items: ReviewItem[] }> {
+  return request("/api/v1/reviews/my", { token });
+}
+
+/** Candidate fetches a single review item by ID (checks for coachFeedback). */
+export function getReviewStatus(token: string, reviewId: string): Promise<ReviewItem> {
+  return request(`/api/v1/reviews/${encodeURIComponent(reviewId)}`, { token });
 }
 
 export function getAdminUsers(token: string): Promise<{ users: AdminUser[] }> {

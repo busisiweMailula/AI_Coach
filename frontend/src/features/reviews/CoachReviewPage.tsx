@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   ApiError,
@@ -7,6 +7,7 @@ import {
   getCoachReviewDetails,
   getCoachDashboard,
   getPendingReviews,
+  getCoachReviewVideo,
   getReviewResumeFile,
   releaseReview,
   type CoachReviewDetails,
@@ -31,6 +32,7 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
   const [modifiedOutput, setModifiedOutput] = useState("");
   const [recommendations, setRecommendations] = useState("");
   const [internalNote, setInternalNote] = useState("");
+  const [coachFeedback, setCoachFeedback] = useState("");
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("");
   const [filterRisk, setFilterRisk] = useState("");
@@ -106,6 +108,10 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
       setNotice({ message: "Provide corrected recommendation text before submitting a modification.", error: true });
       return;
     }
+    if (details?.target.type === "interview_evaluation" && !coachFeedback.trim()) {
+      setNotice({ message: "Write coaching feedback for the candidate before submitting.", error: true });
+      return;
+    }
     setSubmitting(true);
     setNotice(null);
     try {
@@ -113,6 +119,7 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
         ...(decision === "modify" ? { modifiedOutput: modifiedOutput.trim() } : {}),
         recommendations: recommendations.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).slice(0, 8),
         ...(internalNote.trim() ? { internalNote: internalNote.trim() } : {}),
+        ...(coachFeedback.trim() ? { coachFeedback: coachFeedback.trim() } : {}),
       });
       setItems((current) => current.filter((item) => item.id !== selectedId));
       setSelectedId("");
@@ -120,6 +127,7 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
       setReason("");
       setRecommendations("");
       setInternalNote("");
+      setCoachFeedback("");
       setView("queue");
       setNotice({ message: "Review decision saved.", error: false });
       void getCoachDashboard(token).then(setDashboard);
@@ -245,6 +253,8 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
                   setRecommendations={setRecommendations}
                   internalNote={internalNote}
                   setInternalNote={setInternalNote}
+                  coachFeedback={coachFeedback}
+                  setCoachFeedback={setCoachFeedback}
                   submitDecision={submitDecision}
                   onRelease={async () => {
                     try {
@@ -270,7 +280,7 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
 
 function ReviewContextView({
   details, token, submitting, reason, setReason, modifiedOutput, setModifiedOutput,
-  recommendations, setRecommendations, internalNote, setInternalNote, submitDecision, onRelease,
+  recommendations, setRecommendations, internalNote, setInternalNote, coachFeedback, setCoachFeedback, submitDecision, onRelease,
 }: {
   details: CoachReviewDetails;
   token: string;
@@ -283,10 +293,41 @@ function ReviewContextView({
   setRecommendations: (value: string) => void;
   internalNote: string;
   setInternalNote: (value: string) => void;
+  coachFeedback: string;
+  setCoachFeedback: (value: string) => void;
   submitDecision: (decision: "approve" | "modify" | "reject") => Promise<void>;
   onRelease: () => Promise<void>;
 }) {
   const [fileError, setFileError] = useState("");
+  const [videoSource, setVideoSource] = useState<string | null>(null);
+  const [videoLoading, setVideoLoading] = useState(false);
+
+  useEffect(() => {
+    const videoUrl = details.review.videoUrl;
+    if (!videoUrl) {
+      setVideoSource(null);
+      setVideoLoading(false);
+      return;
+    }
+    let active = true;
+    let objectUrl: string | null = null;
+    setVideoSource(null);
+    setVideoLoading(true);
+    void getCoachReviewVideo(token, videoUrl).then((blob) => {
+      if (!active) return;
+      objectUrl = URL.createObjectURL(blob);
+      setVideoSource(objectUrl);
+    }).catch((error: unknown) => {
+      if (active) setFileError(errorMessage(error));
+    }).finally(() => {
+      if (active) setVideoLoading(false);
+    });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [details.review.videoUrl, token]);
+
   const citations = details.target.type === "job_match"
     ? details.target.skillResults.flatMap((item) => item.evidenceSnippet ? [item.evidenceSnippet] : [])
     : details.target.type === "resume_suggestion" ? [details.target.sourceSnippet] : [];
@@ -312,6 +353,13 @@ function ReviewContextView({
         <h2>{reviewTypeLabel(details.target.type)}</h2>
         <span className={`risk-badge risk-${details.review.riskLevel}`}>{details.review.riskLevel} risk</span>
       </header>
+      {details.review.videoUrl && (
+        <section className="review-video-section">
+          <h3>Practice video</h3>
+          {videoLoading && <p className="supporting-copy">Loading candidate video…</p>}
+          {videoSource && <video className="review-video-player" src={videoSource} controls playsInline aria-label="Candidate practice video" />}
+        </section>
+      )}
       <section>
         <h3>Candidate account</h3>
         <p><strong>{details.candidate.displayName}</strong> · {details.candidate.email}</p>
@@ -380,6 +428,12 @@ function ReviewContextView({
       )}
       <section className="review-decision-form">
         <h3>Coach decision</h3>
+        {details.target.type === "interview_evaluation" && (
+          <>
+            <label htmlFor="coach-feedback">Coaching feedback (sent to candidate, required)</label>
+            <textarea id="coach-feedback" rows={6} maxLength={5000} value={coachFeedback} onChange={(event) => setCoachFeedback(event.target.value)} required />
+          </>
+        )}
         <label htmlFor="review-reason">Written reason (required)</label>
         <textarea id="review-reason" rows={3} maxLength={2000} value={reason} onChange={(event) => setReason(event.target.value)} required />
         <label htmlFor="review-modified-output">Corrected recommendation / reviewed output (required for Modify)</label>

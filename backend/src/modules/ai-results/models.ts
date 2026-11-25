@@ -144,8 +144,11 @@ export interface ReviewItemDocument {
   originalOutput?: string | null;
   recommendations?: string[];
   internalNote?: string | null;
+  /** Written coaching feedback sent back to the candidate after review. */
+  coachFeedback: string | null;
   decidedBy: ObjectId | null;
   decidedAt: Date | null;
+  videoKey?: string;
   createdAt: Date;
   updatedAt: Date;
 }

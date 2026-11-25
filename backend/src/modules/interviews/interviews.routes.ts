@@ -1,6 +1,8 @@
 import { ObjectId } from "mongodb";
 import { Router } from "express";
 import { z } from "zod";
+import multer from "multer";
+import { randomUUID } from "node:crypto";
 import { asyncHandler } from "../../common/async-handler.js";
 import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from "../../common/errors.js";
 import { finishInterviewGraph, resumeInterviewGraph, startInterviewGraph } from "../../graphs/mock-interview.graph.js";
@@ -10,6 +12,8 @@ import { getLlmProvider } from "../../infra/llm/provider-factory.js";
 import { getDb } from "../../infra/db/database.js";
 import { authMiddleware, requireRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
+import { LocalFileStorage } from "../../infra/storage/local-file-storage.js";
+import type { ReviewItemDocument } from "../ai-results/models.js";
 import type {
   InterviewAnswerDocument,
   InterviewEvaluationDocument,
@@ -190,6 +194,14 @@ interviewsRouter.get(
     const evaluation = await getDb().collection<InterviewEvaluationDocument>("interview_evaluations")
       .findOne({ _id: session.evaluationId, ownerId: session.ownerId });
     if (!evaluation) throw new NotFoundError("Interview evaluation not found");
+
+    // Look up the review item for this evaluation so the candidate can poll it
+    const reviewItem = await getDb().collection("review_items").findOne({
+      ownerId: session.ownerId,
+      targetType: "interview_evaluation",
+      targetId: session.evaluationId,
+    }, { sort: { createdAt: -1 } });
+
     res.status(200).json({
       success: true,
       data: {
@@ -197,8 +209,97 @@ interviewsRouter.get(
         status: session.status,
         evaluations: [evaluationResponse(evaluation, session.reviewStatus)],
         reviewStatus: session.reviewStatus,
+        reviewId: reviewItem ? (reviewItem._id as import("mongodb").ObjectId).toHexString() : null,
       },
     });
+  }),
+);
+
+const videoStorage = new LocalFileStorage();
+const videoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024, files: 1, fields: 0 }, // 200 MB
+});
+
+// POST /interviews/:sessionId/video — candidate uploads their practice video
+// The video is saved locally and linked to the pending review item for this session.
+interviewsRouter.post(
+  "/interviews/:sessionId/video",
+  videoUpload.single("video"),
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw new UnauthorizedError();
+    const ownerId = new ObjectId(req.auth.userId);
+    const session = await findSession(req.params.sessionId, req.auth.userId);
+
+    const file = req.file;
+    if (!file || !file.buffer || file.buffer.length === 0) {
+      throw new ValidationError("No video file was received");
+    }
+
+    // Allow only webm / mp4
+    const originalExt = (file.originalname.split(".").pop() ?? "webm").toLowerCase();
+    const ext = ["webm", "mp4"].includes(originalExt) ? originalExt : "webm";
+    const storageKey = `videos/${ownerId.toHexString()}/${session._id.toHexString()}/${randomUUID()}.${ext}`;
+
+    await videoStorage.put(storageKey, file.buffer);
+
+    const reviews = getDb().collection<ReviewItemDocument>("review_items");
+    const review = await reviews.findOne(
+      {
+        ownerId,
+        targetType: "interview_evaluation",
+        status: { $in: ["pending_review", "in_review"] },
+        ...(session.evaluationId ? { targetId: session.evaluationId } : { _id: null }),
+      },
+    );
+    if (!review) {
+      await videoStorage.delete(storageKey);
+      throw new ConflictError("Submit a coach review request before uploading a video");
+    }
+    const linked = await reviews.updateOne(
+      { _id: review._id, status: { $in: ["pending_review", "in_review"] } },
+      { $set: { videoKey: storageKey, updatedAt: new Date() } },
+    );
+    if (linked.matchedCount === 0) {
+      await videoStorage.delete(storageKey);
+      throw new ConflictError("The coach review is no longer pending");
+    }
+
+    res.status(200).json({ success: true, data: { videoUrl: `/api/v1/interviews/${req.params.sessionId}/video/${encodeURIComponent(storageKey)}` } });
+  }),
+);
+
+// GET /interviews/:sessionId/video/:key — stream the stored video (candidate or coach)
+interviewsRouter.get(
+  "/interviews/:sessionId/video/:key",
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw new UnauthorizedError();
+    const ownerId = new ObjectId(req.auth.userId);
+    const session = await findSession(req.params.sessionId, req.auth.userId).catch(() => null);
+
+    // Coaches can also view videos attached to their review items
+    let authorised = session !== null;
+    if (!authorised && req.auth.role === "coach") {
+      const reviewItem = await getDb().collection<ReviewItemDocument>("review_items").findOne({
+        videoKey: req.params.key,
+        status: { $in: ["pending_review", "in_review"] },
+      });
+      authorised = reviewItem !== null;
+    }
+    if (!authorised) throw new NotFoundError("Video not found");
+
+    // Prevent path traversal — key must start with videos/{ownerId}/
+    const key = req.params.key;
+    if (!key.startsWith(`videos/${ownerId.toHexString()}/`) && req.auth.role !== "coach") {
+      throw new NotFoundError("Video not found");
+    }
+
+    const buffer = await videoStorage.get(key);
+    const ext = key.endsWith(".mp4") ? "mp4" : "webm";
+    res.setHeader("Content-Type", ext === "mp4" ? "video/mp4" : "video/webm");
+    res.setHeader("Content-Length", buffer.length);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(buffer);
   }),
 );
 
@@ -311,6 +412,7 @@ function evaluationResponse(
     };
   }
   return {
+    id: evaluation._id.toHexString(),
     rubricVersion: evaluation.rubricVersion,
     scores: Object.fromEntries(evaluation.dimensions.map((item) => [item.dimension, item.score])),
     dimensionFeedback: evaluation.dimensions,
