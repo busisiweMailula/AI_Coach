@@ -12,8 +12,10 @@ import {
   generateQuestions,
   getCandidateProgress,
   getConsentStatus,
+  getCandidateReviews,
   getInterview,
   getInterviewResults,
+  getReviewStatus,
   getJob,
   getJobs,
   getJobStatus,
@@ -27,15 +29,18 @@ import {
   getResumeSuggestions,
   getSkillGaps,
   optimizeResume,
+  requestReview,
   requestResumeDraftReview,
   saveResumeStructure,
   startInterview,
   submitJobDescription,
   updateResume,
   uploadResume,
+  uploadInterviewVideo,
   type CandidateProgress,
   type ConsentStatus,
   type InterviewEvaluation,
+  type ReviewItem,
   type InterviewQuestion,
   type InterviewSession,
   type InterviewType,
@@ -44,11 +49,11 @@ import {
   type Resume,
   type StructuredCv,
   type ResumeSuggestion,
-  type ReviewItem,
   type SkillGapResult,
 } from "../../api/client";
 import { useInterviewSpeech } from "./interview-speech";
 import { useInterviewRecognition } from "./interview-recognition";
+import { useInterviewVideo } from "./interview-video";
 
 interface Props {
   token: string;
@@ -74,14 +79,15 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState("");
   const [jobs, setJobs] = useState<JobDescription[]>([]);
+  const [coachFeedbackItems, setCoachFeedbackItems] = useState<ReviewItem[]>([]);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([getCandidateProgress(token), getResumes(token), getJobs(token)])
-      .then(([progressResult, resumeResult, jobResult]) => {
+    Promise.all([getCandidateProgress(token), getResumes(token), getJobs(token), getCandidateReviews(token)])
+      .then(([progressResult, resumeResult, jobResult, reviewResult]) => {
         if (!active) return;
         setProgress(progressResult);
         setResumes(resumeResult.items);
@@ -89,6 +95,11 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
           ? current
           : resumeResult.items[0]?.id ?? "");
         setJobs(jobResult.items);
+        setCoachFeedbackItems(
+          reviewResult.items.filter(
+            (item) => item.targetType === "interview_evaluation" && item.coachFeedback,
+          ),
+        );
       })
       .catch((error: unknown) => {
         if (active) setNotice({ text: errorMessage(error), error: true });
@@ -100,12 +111,17 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
   }, [token]);
 
   async function refreshData() {
-    const [progressResult, resumeResult, jobResult] = await Promise.all([
-      getCandidateProgress(token), getResumes(token), getJobs(token),
+    const [progressResult, resumeResult, jobResult, reviewResult] = await Promise.all([
+      getCandidateProgress(token), getResumes(token), getJobs(token), getCandidateReviews(token),
     ]);
     setProgress(progressResult);
     setResumes(resumeResult.items);
     setJobs(jobResult.items);
+    setCoachFeedbackItems(
+      reviewResult.items.filter(
+        (item) => item.targetType === "interview_evaluation" && item.coachFeedback,
+      ),
+    );
   }
 
   function navigateTo(next: Tab) {
@@ -168,6 +184,7 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
                     progress={progress}
                     resumes={resumes}
                     jobs={jobs}
+                    coachFeedbackCount={coachFeedbackItems.length}
                     onOpen={navigateTo}
                   />
                 )}
@@ -229,6 +246,7 @@ export default function CandidateWorkspace({ token, email, onWithdraw, onConsent
                       title="Practise with a little more confidence."
                       description="Build questions for a role, practise one answer at a time, and review actionable feedback."
                     />
+                    <CoachFeedbackInbox items={coachFeedbackItems} />
                     <InterviewSection token={token} resumes={resumes} selectedResumeId={selectedResumeId} jobs={jobs} />
                   </>
                 )}
@@ -284,11 +302,12 @@ function WorkspaceSubnav({ label, items, selected, onSelect }: {
   );
 }
 
-function Dashboard({ email, progress, resumes, jobs, onOpen }: {
+function Dashboard({ email, progress, resumes, jobs, coachFeedbackCount, onOpen }: {
   email: string;
   progress: CandidateProgress | null;
   resumes: Resume[];
   jobs: JobDescription[];
+  coachFeedbackCount: number;
   onOpen: (tab: Tab) => void;
 }) {
   const practiceScore = progress?.averageRubricScores.overall;
@@ -343,7 +362,9 @@ function Dashboard({ email, progress, resumes, jobs, onOpen }: {
         <div className="next-step-actions">
           <button type="button" onClick={() => onOpen("jobs")}>Add a role <span aria-hidden="true">→</span></button>
           <button type="button" onClick={() => onOpen("match")}>Explore your match <span aria-hidden="true">→</span></button>
-          <button type="button" onClick={() => onOpen("interview")}>Practise an interview <span aria-hidden="true">→</span></button>
+          <button type="button" onClick={() => onOpen("interview")}>
+              Practise an interview{coachFeedbackCount > 0 && <span className="feedback-badge">{coachFeedbackCount}</span>} <span aria-hidden="true">→</span>
+            </button>
         </div>
         <p className="overview-footnote">CV and interview feedback is guidance based on the information you provide, not a hiring decision.</p>
         {(resumes.length > 0 || jobs.length > 0) && (
@@ -1052,41 +1073,6 @@ function StudioSection({ token, resumes, selectedResumeId, jobs }: {
   );
 }
 
-function coachReviewStatusLabel(status: ReviewItem["status"]) {
-  if (status === "pending_review" || status === "in_review") return "Waiting for coach feedback";
-  if (status === "edited") return "Coach feedback received";
-  if (status === "rejected") return "Coach declined the review";
-  return "Coach review completed";
-}
-
-function changedSectionIds(original: StructuredCv | null, draft: StructuredCv | null): string[] {
-  if (!original || !draft) return [];
-  return draft.sections.filter((section) => {
-    const before = original.sections.find((item) => item.id === section.id);
-    if (!before) return true;
-    return before.lines.map((line) => `${line.kind}:${line.text}`).join("\n") !==
-      section.lines.map((line) => `${line.kind}:${line.text}`).join("\n");
-  }).map((section) => section.id);
-}
-
-function serializeStructuredCv(cv: StructuredCv): string {
-  const header = [
-    cv.header.name,
-    cv.header.headline,
-    cv.header.phone,
-    cv.header.email,
-    cv.header.location,
-    ...cv.header.links,
-  ].filter(Boolean);
-  return [
-    ...header,
-    ...cv.sections.flatMap((section) => [
-      ...(section.heading ? [section.heading] : []),
-      ...section.lines.map((line) => line.kind === "bullet" ? `• ${line.text}` : line.text),
-    ]),
-  ].join("\n");
-}
-
 function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
   token: string;
   resumes: Resume[];
@@ -1106,11 +1092,21 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
   const [evaluationRetry, setEvaluationRetry] = useState(0);
   const [evaluationLoading, setEvaluationLoading] = useState(false);
   const [autoRead, setAutoRead] = useState(false);
+  const [coachSubmitting, setCoachSubmitting] = useState(false);
+  const [coachSubmitted, setCoachSubmitted] = useState(false);
+  const [coachRequestText, setCoachRequestText] = useState("");
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [coachReview, setCoachReview] = useState<ReviewItem | null>(null);
   const [voiceURI, setVoiceURI] = useState("");
+  const [answerSeconds, setAnswerSeconds] = useState(120);
+  const [timerQuestionId, setTimerQuestionId] = useState("");
+  const [recordingAttempts, setRecordingAttempts] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const speech = useInterviewSpeech();
   const recognition = useInterviewRecognition();
+  const video = useInterviewVideo();
+  const answerRecordingActive = recognition.isListening || video.isRecording;
   const currentQuestion = session?.currentQuestion ?? null;
   const activeJob = jobs.find((job) => job.id === jobId);
   const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
@@ -1127,6 +1123,44 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
   useEffect(() => {
     if (autoRead && feedbackText) speech.speak(feedbackText, voiceURI);
   }, [autoRead, feedbackText, speech.speak, voiceURI]);
+
+  useEffect(() => {
+    if (session?.status !== "in_progress" || !currentQuestion) return;
+    setAnswerSeconds(120);
+    setTimerQuestionId(currentQuestion.id);
+  }, [currentQuestion?.id, session?.status]);
+
+  useEffect(() => {
+    if (
+      session?.status !== "in_progress" ||
+      !currentQuestion ||
+      timerQuestionId !== currentQuestion.id ||
+      !answerRecordingActive
+    ) return;
+
+    const timer = window.setInterval(() => {
+      setAnswerSeconds((remaining) => {
+        if (remaining <= 1) {
+          window.clearInterval(timer);
+          return 0;
+        }
+        return remaining - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [answerRecordingActive, currentQuestion?.id, session?.status, timerQuestionId]);
+
+  useEffect(() => {
+    if (answerSeconds !== 0 || session?.status !== "in_progress" || timerQuestionId !== currentQuestion?.id) return;
+    recognition.stop();
+    speech.stop();
+    video.stop();
+    setNotice({ text: "Two minutes of recording time are up. Recording has stopped; review and submit your answer to continue.", error: false });
+  }, [answerSeconds, currentQuestion?.id, recognition.stop, session?.status, speech.stop, timerQuestionId, video.stop]);
+
+  useEffect(() => {
+    setRecordingAttempts(0);
+  }, [currentQuestion?.id]);
 
   useEffect(() => {
     if (!session || session.status !== "evaluating") return;
@@ -1167,6 +1201,7 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
         if (!active) return;
         setSession(latest);
         setEvaluation(results.evaluations);
+        if (results.reviewId) setReviewId(results.reviewId);
         setEvaluationJobId("");
         setNotice({ text: "Interview feedback is ready.", error: false });
       } catch (error) {
@@ -1184,6 +1219,7 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
     if (!jobId) { setNotice({ text: "Select a job description.", error: true }); return; }
     speech.stop();
     recognition.stop();
+    video.stop();
     setBusy(true);
     setNotice(null);
     setQuestions([]);
@@ -1217,6 +1253,7 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
     }
     speech.stop();
     recognition.stop();
+    video.stop();
     setBusy(true);
     setNotice(null);
     try {
@@ -1241,6 +1278,7 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
     if (!submittedAnswer) return;
     speech.stop();
     recognition.stop();
+    video.stop();
     recognition.clearTranscript();
     setBusy(true);
     setNotice(null);
@@ -1276,6 +1314,7 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
     if (!session || conversation.length === 0) return;
     speech.stop();
     recognition.stop();
+    video.stop();
     recognition.clearTranscript();
     setBusy(true);
     setNotice(null);
@@ -1291,6 +1330,32 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
     }
   }
 
+  // Poll for coach feedback after the candidate submits to coach
+  useEffect(() => {
+    if (!coachSubmitted || !reviewId || coachReview?.coachFeedback) return;
+    let active = true;
+    let attempt = 0;
+
+    async function poll() {
+      while (active) {
+        await delay(attempt < 60 ? 10_000 : 30_000);
+        if (!active) break;
+        try {
+          const item = await getReviewStatus(token, reviewId!);
+          if (!active) break;
+          setCoachReview(item);
+          if (item.coachFeedback || item.status === "approved" || item.status === "edited" || item.status === "rejected") break;
+        } catch {
+          // ignore transient errors, keep polling
+        }
+        attempt += 1;
+      }
+    }
+
+    void poll();
+    return () => { active = false; };
+  }, [coachSubmitted, reviewId, coachReview?.coachFeedback, token]);
+
   function startAnotherInterview() {
     speech.stop();
     recognition.stop();
@@ -1300,14 +1365,55 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
     setAnswer("");
     setEvaluation(null);
     setEvaluationJobId("");
+    setCoachSubmitted(false);
+    setCoachRequestText("");
+    setReviewId(null);
+    setCoachReview(null);
     setNotice(null);
   }
 
+  async function submitToCoach() {
+    if (!session || !evaluation) return;
+    if (!coachRequestText.trim()) {
+      setNotice({ text: "Add a note for your coach before submitting your interview.", error: true });
+      return;
+    }
+    const evalId = evaluation[0]?.id;
+    if (!evalId) {
+      setNotice({ text: "Evaluation ID is not available. Try refreshing feedback first.", error: true });
+      return;
+    }
+    setCoachSubmitting(true);
+    setNotice(null);
+    try {
+      const review = await requestReview(
+        token,
+        "interview_evaluation",
+        evalId,
+        coachRequestText.trim(),
+      );
+      setReviewId(review.id);
+
+      // Create or update the review before uploading so the video is linked to it.
+      if (video.previewUrl) {
+        const response = await fetch(video.previewUrl);
+        const blob = await response.blob();
+        await uploadInterviewVideo(token, session.id, blob, video.fileExtension);
+      }
+      setCoachSubmitted(true);
+      setNotice({ text: "Your interview, note, and video were submitted to your coach for review.", error: false });
+    } catch (error) {
+      setNotice({ text: errorMessage(error), error: true });
+    } finally {
+      setCoachSubmitting(false);
+    }
+  }
+
   function startRecording() {
-    setAnswer(joinAnswerText(answer, recognition.transcript));
+    if (recordingAttempts >= 3 || answerSeconds === 0 || video.isRecording) return;
     recognition.clearTranscript();
     speech.stop();
-    recognition.start();
+    if (recognition.start()) setRecordingAttempts((attempts) => attempts + 1);
   }
 
   function stopRecording() {
@@ -1447,10 +1553,14 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
                   <h3>{currentQuestion.text}</h3>
                   <SpeechControls speech={speech} text={currentQuestion.text} voiceURI={voiceURI} label="question" />
                 </article>
+                <div className={`interview-answer-timer${answerSeconds <= 15 ? " warning" : ""}`} role="timer" aria-live="off">
+                  <span>{answerRecordingActive ? "Recording · time remaining" : "Paused · time remaining"}</span>
+                  <strong>{`${Math.floor(answerSeconds / 60)}:${String(answerSeconds % 60).padStart(2, "0")}`}</strong>
+                </div>
                 <p className="interview-answer-guidance">
                   {currentQuestion.type === "technical"
-                    ? "Type your technical answer and explain your approach."
-                    : "Record your behavioural answer for transcription, or type it below."}
+                    ? "Explain your approach by speaking or typing. The two-minute timer runs only while recording and pauses when you stop."
+                    : "Speak your answer for transcription or type it below. The two-minute timer runs only while recording and pauses when you stop."}
                 </p>
                 <label className="interview-answer-label" htmlFor="interview-answer">Your answer</label>
                 <textarea
@@ -1471,10 +1581,10 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
                   <button
                     className="secondary"
                     type="button"
-                    disabled={!recognition.available || recognition.isListening || busy}
+                    disabled={!recognition.available || recognition.isListening || busy || answerSeconds === 0 || recordingAttempts >= 3 || video.isRecording}
                     onClick={startRecording}
                   >
-                    Record answer
+                    Record answer ({recordingAttempts}/3)
                   </button>
                   <button
                     className="secondary"
@@ -1486,10 +1596,14 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
                   </button>
                   <p role="status" aria-live="polite">
                     {recognition.error ?? (recognition.available
-                      ? "Speech-to-text uses your browser’s speech service; microphone access may be requested."
+                      ? "Speech-to-text uses your browser’s speech service. You can make up to three recordings per question, then review and edit the transcript before submitting."
                       : "Speech-to-text is unavailable in this browser. You can type your answer.")}
                   </p>
                 </div>
+                <InterviewVideoRecorder
+                  video={video}
+                  disabled={busy || recognition.isListening || answerSeconds === 0}
+                />
                 <div className="actions">
                   <button className="primary" type="button" disabled={busy || recognition.isListening || !joinAnswerText(answer, recognition.transcript).trim()} onClick={() => void submitAnswer()}>{busy ? "Submitting…" : "Submit answer"}</button>
                   <button className="secondary" type="button" disabled={busy || recognition.isListening || conversation.length === 0 || Boolean(joinAnswerText(answer, recognition.transcript).trim())} onClick={() => void finish()}>Finish and get feedback</button>
@@ -1508,7 +1622,35 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
                 )}
               </>
             ) : session.status === "completed" ? (
-              <button className="secondary" type="button" onClick={startAnotherInterview}>Start another practice interview</button>
+              <>
+                <button className="secondary" type="button" onClick={startAnotherInterview}>Start another practice interview</button>
+                {evaluation && !coachSubmitted && (
+                  <>
+                    <label htmlFor="coach-request-note">Note for your coach</label>
+                    <textarea
+                      id="coach-request-note"
+                      rows={3}
+                      maxLength={2000}
+                      value={coachRequestText}
+                      onChange={(event) => setCoachRequestText(event.target.value)}
+                      placeholder="What would you like your coach to focus on?"
+                      required
+                    />
+                    <button
+                      className="primary"
+                      type="button"
+                      disabled={coachSubmitting || !coachRequestText.trim()}
+                      onClick={() => void submitToCoach()}
+                      style={{ marginTop: "10px" }}
+                    >
+                      {coachSubmitting ? "Submitting…" : video.previewUrl ? "Submit answers, note + video to coach" : "Submit answers + note to coach"}
+                    </button>
+                  </>
+                )}
+                {coachSubmitted && (
+                  <p className="notice" role="status">✓ Submitted to coach for review.</p>
+                )}
+              </>
             ) : (
               <p className="supporting-copy">This session is no longer accepting answers. Start a new practice interview when ready.</p>
             )}
@@ -1518,6 +1660,7 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
                 speech={speech}
                 voiceURI={voiceURI}
                 speechText={feedbackText}
+                coachReview={coachReview}
               />
             )}
           </>
@@ -1537,6 +1680,55 @@ function InterviewSection({ token, resumes, selectedResumeId, jobs }: {
 }
 
 type InterviewSpeech = ReturnType<typeof useInterviewSpeech>;
+type InterviewVideo = ReturnType<typeof useInterviewVideo>;
+
+function InterviewVideoRecorder({ video, disabled }: { video: InterviewVideo; disabled: boolean }) {
+  const videoElement = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (videoElement.current) {
+      videoElement.current.srcObject = video.isRecording ? video.stream ?? null : null;
+    }
+  }, [video.isRecording, video.stream]);
+
+  return (
+    <section className="interview-video-recorder" aria-label="Optional video practice">
+      <h3>Optional video practice</h3>
+      <p className="supporting-copy">Record yourself with camera and microphone. Stop speech-to-text first. The clip stays in this browser until you submit the interview to your coach.</p>
+      {(video.isRecording || video.previewUrl) && (
+        <video
+          ref={videoElement}
+          className="interview-video-preview"
+          src={video.isRecording ? undefined : video.previewUrl ?? undefined}
+          autoPlay={video.isRecording}
+          muted={video.isRecording}
+          controls={!video.isRecording}
+          playsInline
+        />
+      )}
+      <div className="interview-video-actions">
+        {video.isRecording ? (
+          <button className="secondary" type="button" onClick={video.stop}>Stop video</button>
+        ) : (
+          <button className="secondary" type="button" disabled={!video.available || disabled} onClick={() => void video.start()}>
+            Record video
+          </button>
+        )}
+        {video.previewUrl && (
+          <>
+            <a className="secondary interview-video-download" href={video.previewUrl} download={`interview-practice.${video.fileExtension}`}>Download video</a>
+            <button className="secondary" type="button" onClick={video.clear}>Discard video</button>
+          </>
+        )}
+      </div>
+      <p className="interview-video-status" role={video.error ? "alert" : "status"} aria-live="polite">
+        {video.error ?? (video.available
+          ? "Camera and microphone access is needed. The video is shared with your coach only when you submit the interview."
+          : "Video recording is unavailable. Open this app at http://localhost:3000/ or use HTTPS with camera and microphone permission.")}
+      </p>
+    </section>
+  );
+}
 
 function SpeechControls({
   speech,
@@ -1595,11 +1787,13 @@ function EvaluationReport({
   speech,
   voiceURI,
   speechText,
+  coachReview,
 }: {
   evaluations: InterviewEvaluation[];
   speech: InterviewSpeech;
   voiceURI: string;
   speechText: string;
+  coachReview: ReviewItem | null;
 }) {
   return (
     <section className="result-section interview-feedback" aria-label="Interview feedback">
@@ -1610,6 +1804,24 @@ function EvaluationReport({
         </div>
         <SpeechControls speech={speech} text={speechText} voiceURI={voiceURI} label="feedback" />
       </div>
+
+      {/* Coach feedback panel — shown once the coach has responded */}
+      {coachReview && coachReview.coachFeedback ? (
+        <div className="coach-feedback-panel">
+          <p className="eyebrow">Coach feedback</p>
+          <h3>Your coach's response</h3>
+          <p className="coach-feedback-body">{coachReview.coachFeedback}</p>
+          <p className="supporting-copy coach-feedback-meta">
+            Reviewed · {new Date(coachReview.updatedAt).toLocaleDateString()}
+          </p>
+        </div>
+      ) : coachReview && (coachReview.status === "pending_review" || coachReview.status === "in_review") ? (
+        <div className="coach-feedback-panel coach-feedback-pending">
+          <p className="eyebrow">Coach review</p>
+          <p>Your submission is in the coach's queue. Feedback will appear here once they respond.</p>
+        </div>
+      ) : null}
+
       {evaluations.map((evaluation, index) => (
         <article key={evaluation.rubricVersion + index}>
           <h3>Overall score: {formatScore(evaluation.overallScore)}%</h3>
@@ -1675,4 +1887,74 @@ function errorMessage(error: unknown) {
     return error.message;
   }
   return error instanceof Error ? error.message : "The request could not be completed.";
+}
+
+function coachReviewStatusLabel(status: ReviewItem["status"]) {
+  if (status === "pending_review" || status === "in_review") return "Waiting for coach feedback";
+  if (status === "edited") return "Coach feedback received";
+  if (status === "rejected") return "Coach declined the review";
+  return "Coach review completed";
+}
+
+function changedSectionIds(original: StructuredCv | null, draft: StructuredCv | null): string[] {
+  if (!original || !draft) return [];
+  return draft.sections.filter((section) => {
+    const before = original.sections.find((item) => item.id === section.id);
+    if (!before) return true;
+    return before.lines.map((line) => `${line.kind}:${line.text}`).join("\n") !==
+      section.lines.map((line) => `${line.kind}:${line.text}`).join("\n");
+  }).map((section) => section.id);
+}
+
+function serializeStructuredCv(cv: StructuredCv): string {
+  const header = [
+    cv.header.name,
+    cv.header.headline,
+    cv.header.phone,
+    cv.header.email,
+    cv.header.location,
+    ...cv.header.links,
+  ].filter(Boolean);
+  return [
+    ...header,
+    ...cv.sections.flatMap((section) => [
+      ...(section.heading ? [section.heading] : []),
+      ...section.lines.map((line) => line.kind === "bullet" ? `• ${line.text}` : line.text),
+    ]),
+  ].join("\n");
+}
+
+function CoachFeedbackInbox({ items }: { items: ReviewItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="coach-inbox" aria-label="Coach feedback">
+      <div className="coach-inbox-heading">
+        <p className="eyebrow">Coach feedback</p>
+        <h2>Your coach has responded</h2>
+        <p className="supporting-copy">
+          {items.length === 1
+            ? "Your coach has reviewed your practice session and left feedback below."
+            : `Your coach has reviewed ${items.length} practice sessions and left feedback below.`}
+        </p>
+      </div>
+      <div className="coach-inbox-list">
+        {items.map((item) => (
+          <article key={item.id} className="coach-inbox-card">
+            <div className="coach-inbox-meta">
+              <span className="coach-inbox-date">{new Date(item.updatedAt).toLocaleDateString("en-ZA", { year: "numeric", month: "long", day: "numeric" })}</span>
+              <span className={`coach-inbox-status coach-inbox-status--${item.status}`}>
+                {item.status === "approved" ? "Approved" : item.status === "edited" ? "Reviewed with edits" : "Reviewed"}
+              </span>
+            </div>
+            <p className="coach-inbox-feedback">{item.coachFeedback}</p>
+            {item.requestReason && (
+              <p className="supporting-copy coach-inbox-request">
+                <strong>Your submission note:</strong> {item.requestReason}
+              </p>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }

@@ -127,8 +127,11 @@ export interface ReviewItemDocument {
   requestReason: string | null;
   decisionReason: string | null;
   decisionText: string | null;
+  /** Written coaching feedback sent back to the candidate after review. */
+  coachFeedback: string | null;
   decidedBy: ObjectId | null;
   decidedAt: Date | null;
+  videoKey?: string;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -5,6 +5,7 @@ import {
   decideReview,
   getCoachReviewDetails,
   getPendingReviews,
+  getCoachReviewVideo,
   type CoachReviewDetails,
   type ReviewItem,
 } from "../../api/client";
@@ -27,7 +28,10 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
   const [submitting, setSubmitting] = useState(false);
   const [reason, setReason] = useState("");
   const [editedText, setEditedText] = useState("");
+  const [coachFeedback, setCoachFeedback] = useState("");
   const [notice, setNotice] = useState<{ message: string; error: boolean } | null>(null);
+  const [videoSource, setVideoSource] = useState<string | null>(null);
+  const [videoLoading, setVideoLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -68,24 +72,63 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
     };
   }, [selectedId, token]);
 
+  useEffect(() => {
+    const videoUrl = details?.review.videoUrl;
+    if (!videoUrl) {
+      setVideoSource(null);
+      setVideoLoading(false);
+      return;
+    }
+
+    let active = true;
+    let objectUrl: string | null = null;
+    setVideoSource(null);
+    setVideoLoading(true);
+    void getCoachReviewVideo(token, videoUrl).then((blob) => {
+      if (!active) return;
+      objectUrl = URL.createObjectURL(blob);
+      setVideoSource(objectUrl);
+    }).catch((error: unknown) => {
+      if (active) setNotice({ message: errorMessage(error), error: true });
+    }).finally(() => {
+      if (active) setVideoLoading(false);
+    });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [details?.review.videoUrl, token]);
+
   async function submitDecision(decision: "approve" | "edit" | "reject") {
     if (!selectedId || !reason.trim()) {
-      setNotice({ message: "Add a reason before submitting a review decision.", error: true });
+      setNotice({ message: "Add an internal decision reason before submitting.", error: true });
       return;
     }
     if (decision === "edit" && !editedText.trim()) {
       setNotice({ message: "Provide the edited recommendation before approving it.", error: true });
       return;
     }
+    if (details?.target.type === "interview_evaluation" && !coachFeedback.trim()) {
+      setNotice({ message: "Write coaching feedback for the candidate before submitting.", error: true });
+      return;
+    }
     setSubmitting(true);
     setNotice(null);
     try {
-      await decideReview(token, selectedId, decision, reason, decision === "edit" ? editedText : undefined);
+      await decideReview(
+        token,
+        selectedId,
+        decision,
+        reason,
+        decision === "edit" ? editedText : undefined,
+        coachFeedback.trim() || undefined,
+      );
       setItems((current) => current.filter((item) => item.id !== selectedId));
       setSelectedId("");
       setDetails(null);
       setReason("");
-      setNotice({ message: "Review decision saved.", error: false });
+      setCoachFeedback("");
+      setNotice({ message: "Review decision saved and feedback sent to candidate.", error: false });
     } catch (error) {
       setNotice({ message: errorMessage(error), error: true });
     } finally {
@@ -116,6 +159,7 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
                     onClick={() => {
                       setSelectedId(item.id);
                       setReason("");
+                      setCoachFeedback("");
                       setNotice(null);
                     }}
                   >
@@ -137,15 +181,52 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
           ) : details ? (
             <>
               <h2>{reviewTypeLabel(details.target.type)}</h2>
+
+              {/* Video player — shown when the candidate submitted a practice video */}
+              {details.review.videoUrl && (
+                <div className="review-video-section">
+                  <h3>Practice video</h3>
+                  {videoLoading && <p className="supporting-copy">Loading candidate video…</p>}
+                  {videoSource && (
+                    <video
+                      className="review-video-player"
+                      src={videoSource}
+                      controls
+                      playsInline
+                      aria-label="Candidate practice video"
+                    />
+                  )}
+                </div>
+              )}
+
               <ReviewTarget target={details.target} />
-              {details.review.requestReason && <p><strong>Candidate request:</strong> {details.review.requestReason}</p>}
+              {details.review.requestReason && <p><strong>Candidate note:</strong> {details.review.requestReason}</p>}
+
+              {details.target.type === "interview_evaluation" && (
+                <>
+                  <label htmlFor="coach-feedback">
+                    Coaching feedback <span className="label-required">(sent to candidate)</span>
+                  </label>
+                  <textarea
+                    id="coach-feedback"
+                    rows={6}
+                    maxLength={5000}
+                    placeholder="Write specific feedback for the candidate based on their answers and video. This is what they will read."
+                    value={coachFeedback}
+                    onChange={(event) => setCoachFeedback(event.target.value)}
+                    required
+                  />
+                </>
+              )}
+
               <label htmlFor="review-reason">
-                {details.target.type === "resume_draft" ? "Summary for the candidate" : "Decision reason"}
+                Internal decision reason <span className="label-hint">(not shown to candidate)</span>
               </label>
               <textarea
                 id="review-reason"
                 rows={3}
                 maxLength={2000}
+                placeholder="Explain your decision for the audit log."
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
                 required
@@ -171,7 +252,7 @@ export default function CoachReviewPage({ token }: CoachReviewPageProps) {
                   </button>
                 ) : (
                   <button className="primary" type="button" disabled={submitting} onClick={() => void submitDecision("approve")}>
-                    Approve
+                    {details.target.type === "interview_evaluation" ? "Send feedback to candidate" : "Approve"}
                   </button>
                 )}
                 {details.target.type === "resume_suggestion" && (

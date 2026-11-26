@@ -529,6 +529,74 @@ describe("Phase 5 AI workflows", () => {
       configureResumeAnonymizer({ anonymize: async (text) => text });
     }
   });
+
+  it("streams a saved practice video to its assigned coach using the JSON database", async () => {
+    const videoKey = `videos/${ownerId.toHexString()}/${new ObjectId().toHexString()}/${randomUUID()}.webm`;
+    const video = Buffer.from("practice video");
+    const videoPath = path.join(storageRoot, ...videoKey.split("/"));
+    await mkdir(path.dirname(videoPath), { recursive: true });
+    await writeFile(videoPath, video);
+    await database.collection("review_items").insertOne({
+      _id: new ObjectId(),
+      ownerId,
+      targetType: "interview_evaluation",
+      targetId: new ObjectId(),
+      flags: ["candidate_requested_review"],
+      riskLevel: "medium",
+      status: "pending_review",
+      assignedCoachId: null,
+      requestReason: "Please review my interview.",
+      decisionReason: null,
+      decisionText: null,
+      coachFeedback: null,
+      decidedBy: null,
+      decidedAt: null,
+      videoKey,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const response = await request(app)
+      .get(`/api/v1/reviews/video/${encodeURIComponent(videoKey)}`)
+      .set("Authorization", `Bearer ${coachToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toBe("video/webm");
+    expect(response.body).toEqual(video);
+  });
+
+  it("does not stream a practice video assigned to another coach", async () => {
+    const videoKey = `videos/${ownerId.toHexString()}/${new ObjectId().toHexString()}/${randomUUID()}.webm`;
+    const videoPath = path.join(storageRoot, ...videoKey.split("/"));
+    await mkdir(path.dirname(videoPath), { recursive: true });
+    await writeFile(videoPath, Buffer.from("practice video"));
+    await database.collection("review_items").insertOne({
+      _id: new ObjectId(),
+      ownerId,
+      targetType: "interview_evaluation",
+      targetId: new ObjectId(),
+      flags: ["candidate_requested_review"],
+      riskLevel: "medium",
+      status: "pending_review",
+      assignedCoachId: otherId,
+      requestReason: "Please review my interview.",
+      decisionReason: null,
+      decisionText: null,
+      coachFeedback: null,
+      decidedBy: null,
+      decidedAt: null,
+      videoKey,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const response = await request(app)
+      .get(`/api/v1/reviews/video/${encodeURIComponent(videoKey)}`)
+      .set("Authorization", `Bearer ${coachToken}`);
+
+    expect(response.status).toBe(404);
+    expect(response.body.error.message).toBe("Video not found");
+  });
 });
 
 async function seedResumeAndDescription(

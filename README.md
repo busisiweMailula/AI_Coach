@@ -2,6 +2,8 @@
 
 The core backend is implemented for authentication, secure intake, consent, AI preparation workflows, human review, and interview practice. Application records and uploaded source files are stored in the configured remote MongoDB deployment; upload binaries use GridFS. Semantic resume-to-job retrieval uses Mistral embeddings and local cosine ranking. Graph checkpoints remain in process memory.
 
+Interview practice accepts typed answers or editable browser speech transcripts, with a two-minute recording timer that runs only while speech or video is being recorded and pauses when recording stops. Candidates can make up to three speech recordings per question. Optional video practice records camera and microphone locally for preview or download. A clip is uploaded to private local storage only when the candidate submits the interview for coach review. Browser speech recognition may use the browser's speech service.
+
 ## Project documentation
 
 - [Initial repository assessment](docs/initial-assessment.md)
