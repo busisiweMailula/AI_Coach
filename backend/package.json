@@ -47,6 +47,7 @@
     "@types/supertest": "^6.0.2",
     "@types/yauzl": "^3.4.0",
     "jszip": "^3.10.2",
+    "mongodb-memory-server": "^11.4.0",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

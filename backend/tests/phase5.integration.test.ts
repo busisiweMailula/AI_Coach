@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 let app: Express;
 let database: import("mongodb").Db;
+let videoStorage: import("../src/infra/storage/mongodb-gridfs-storage.js").MongoGridFsStorage;
 let ownerId: ObjectId;
 let coachId: ObjectId;
 let otherId: ObjectId;
@@ -25,18 +26,20 @@ beforeAll(async () => {
   process.env.RATE_LIMIT_MAX_REQUESTS = "1000";
   process.env.MONGODB_URI = process.env.MONGODB_TEST_URI ?? "mongodb://127.0.0.1:27017";
   process.env.MONGODB_DB_NAME = `ai_coach_test_phase5_${randomUUID().replace(/-/g, "")}`;
-  const [databaseModule, indexModule, appModule, authModule, anonymizerModule] = await Promise.all([
+  const [databaseModule, indexModule, appModule, authModule, anonymizerModule, storageModule] = await Promise.all([
     import("../src/infra/db/database.js"),
     import("../src/infra/db/indexes.js"),
     import("../src/app.js"),
     import("../src/middleware/auth.js"),
     import("../src/modules/privacy/resume-anonymizer.js"),
+    import("../src/infra/storage/mongodb-gridfs-storage.js"),
   ]);
   connectDatabase = databaseModule.connectDatabase;
   closeDatabase = databaseModule.closeDatabase;
   ensureIndexes = indexModule.ensureIndexes;
   signAccessToken = authModule.signAccessToken;
   configureResumeAnonymizer = anonymizerModule.configureResumeAnonymizer;
+  videoStorage = new storageModule.MongoGridFsStorage();
   configureResumeAnonymizer({ anonymize: async (text) => text });
   database = await connectDatabase();
   await ensureIndexes();
@@ -210,10 +213,7 @@ describe("Phase 5 AI workflows", () => {
     expect(submission.status).toBe(201);
     expect(submission.body.data.targetType).toBe("resume_draft");
     expect(submission.body.data.sourceJobDescriptionId).toBe(jobDescriptionId.toHexString());
-    expect(await database.collection("audit_logs").findOne({
-      actorId: ownerId,
-      action: "coach_cv_review_requested",
-    })).toBeTruthy();
+    expect(await waitForAuditEvent("coach_cv_review_requested")).toBeTruthy();
     const reviewId = submission.body.data.id as string;
     expect((await request(app)
       .post("/api/v1/reviews/resume-draft")
@@ -239,7 +239,14 @@ describe("Phase 5 AI workflows", () => {
       .get(`/api/v1/reviews/${reviewId}`)
       .set("Authorization", `Bearer ${coachToken}`);
     expect(coachDetails.status).toBe(200);
-    expect(coachDetails.body.data.target).toEqual({ type: "resume_draft", content: draftContent });
+    expect(coachDetails.body.data.target).toEqual({
+      type: "resume_draft",
+      content: draftContent,
+      candidateResume: {
+        fileName: "resume.pdf",
+        content: "Experienced TypeScript developer.",
+      },
+    });
     expect((await request(app)
       .get(`/api/v1/reviews/${reviewId}`)
       .set("Authorization", `Bearer ${otherToken}`)).status).toBe(404);
@@ -530,12 +537,10 @@ describe("Phase 5 AI workflows", () => {
     }
   });
 
-  it("streams a saved practice video to its assigned coach using the JSON database", async () => {
+  it("streams a saved practice video to its assigned coach from MongoDB GridFS", async () => {
     const videoKey = `videos/${ownerId.toHexString()}/${new ObjectId().toHexString()}/${randomUUID()}.webm`;
     const video = Buffer.from("practice video");
-    const videoPath = path.join(storageRoot, ...videoKey.split("/"));
-    await mkdir(path.dirname(videoPath), { recursive: true });
-    await writeFile(videoPath, video);
+    await videoStorage.put(videoKey, video);
     await database.collection("review_items").insertOne({
       _id: new ObjectId(),
       ownerId,
@@ -567,9 +572,7 @@ describe("Phase 5 AI workflows", () => {
 
   it("does not stream a practice video assigned to another coach", async () => {
     const videoKey = `videos/${ownerId.toHexString()}/${new ObjectId().toHexString()}/${randomUUID()}.webm`;
-    const videoPath = path.join(storageRoot, ...videoKey.split("/"));
-    await mkdir(path.dirname(videoPath), { recursive: true });
-    await writeFile(videoPath, Buffer.from("practice video"));
+    await videoStorage.put(videoKey, Buffer.from("practice video"));
     await database.collection("review_items").insertOne({
       _id: new ObjectId(),
       ownerId,
@@ -662,6 +665,15 @@ async function waitForJob(jobId: string, token = ownerToken): Promise<Record<str
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Job ${jobId} did not finish in time`);
+}
+
+async function waitForAuditEvent(action: string): Promise<unknown> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const event = await database.collection("audit_logs").findOne({ actorId: ownerId, action });
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return null;
 }
 
 async function createDocx(text: string): Promise<Buffer> {

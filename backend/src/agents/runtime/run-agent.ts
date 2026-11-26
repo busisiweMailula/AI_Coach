@@ -10,6 +10,7 @@ import { getLlmProvider } from "../../infra/llm/provider-factory.js";
 import { LlmProviderError } from "../../infra/llm/llm-provider.js";
 import { getDb } from "../../infra/db/database.js";
 import { ensureExternalModelConsent, ensureResumeConsent } from "../../modules/privacy/privacy.service.js";
+import { anonymizeTextForAI } from "../../modules/privacy/resume-anonymizer.js";
 
 const promptUrl = new URL("../../../prompts/v1/agent-system.md", import.meta.url);
 let systemPrompt: string | undefined;
@@ -35,7 +36,23 @@ export async function runAgent<T>(input: {
   }
   await ensureExternalModelConsent(input.ownerId);
   const startedAt = Date.now();
-  const inputJson = JSON.stringify(input.input);
+  const serializedInput = JSON.stringify(input.input);
+  if (typeof serializedInput !== "string") {
+    throw new UpstreamServiceError("AI input could not be safely serialized");
+  }
+  const anonymizedJson = await anonymizeTextForAI(serializedInput);
+  let parsedAnonymizedInput: unknown;
+  try {
+    parsedAnonymizedInput = JSON.parse(anonymizedJson);
+  } catch {
+    throw new UpstreamServiceError(
+      "Text anonymization returned invalid serialized input; content was not sent to an AI service",
+    );
+  }
+  const inputJson = JSON.stringify(parsedAnonymizedInput);
+  if (typeof inputJson !== "string") {
+    throw new UpstreamServiceError("Anonymized AI input could not be safely serialized");
+  }
   const inputHash = createHash("sha256").update(inputJson).digest("hex");
   const executionId = new ObjectId();
   const primaryModel = env.LLM_PROVIDER === "groq" ? env.GROQ_MODEL : env.LLM_MODEL;

@@ -7,6 +7,9 @@ services:
       PRESIDIO_HOST: 0.0.0.0
       PRESIDIO_PORT: 5002
       PRESIDIO_API_TOKEN: ${PRESIDIO_API_TOKEN:?Set PRESIDIO_API_TOKEN in .env}
+      PRESIDIO_SPACY_MODEL: ${PRESIDIO_SPACY_MODEL:-en_core_web_sm}
+      PRESIDIO_PERSON_CONFIDENCE_THRESHOLD: ${PRESIDIO_PERSON_CONFIDENCE_THRESHOLD:-0.6}
+      PRESIDIO_PERSON_ALLOWLIST_PATH: ${PRESIDIO_PERSON_ALLOWLIST_PATH:-/app/person_allowlist.json}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=2)"]
       interval: 10s

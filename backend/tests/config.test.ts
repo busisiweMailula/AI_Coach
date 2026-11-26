@@ -17,6 +17,8 @@ describe("environment configuration", () => {
     expect(config.MONGODB_URI).toBe("mongodb+srv://user:pass@cluster.example.net");
     expect(config.MONGODB_DB_NAME).toBe("ai_coach");
     expect(config.PRESIDIO_URL).toBe("http://127.0.0.1:5002");
+    expect(config.PRESIDIO_SPACY_MODEL).toBe("en_core_web_sm");
+    expect(config.PRESIDIO_PERSON_CONFIDENCE_THRESHOLD).toBe(0.6);
   });
 
   it("rejects localhost MongoDB outside test mode", () => {
@@ -47,6 +49,19 @@ describe("environment configuration", () => {
       MONGODB_URI: "mongodb+srv://user:pass@cluster.example.net",
       EMBEDDING_PROVIDER: "disabled",
     })).toThrow();
+  });
+
+  it("rejects a weak configured Presidio token and invalid person threshold", () => {
+    const base = {
+      NODE_ENV: "test",
+      JWT_SECRET: "a-valid-test-secret-with-at-least-32-chars",
+      MONGODB_URI: "mongodb://127.0.0.1:27017",
+    };
+
+    expect(() => loadEnv({ ...base, PRESIDIO_API_TOKEN: "short" })).toThrow();
+    expect(() => loadEnv({ ...base, PRESIDIO_PERSON_CONFIDENCE_THRESHOLD: "1.1" })).toThrow();
+    expect(loadEnv({ ...base, PRESIDIO_PERSON_CONFIDENCE_THRESHOLD: "0.8" })
+      .PRESIDIO_PERSON_CONFIDENCE_THRESHOLD).toBe(0.8);
   });
 
   it("requires both Inception and Groq keys for the configured fallback", () => {

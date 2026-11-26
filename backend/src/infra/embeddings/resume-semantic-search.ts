@@ -2,6 +2,11 @@ import { ObjectId } from "mongodb";
 import { env } from "../../config/env.js";
 import { getDb } from "../db/database.js";
 import { getTextEmbedder } from "./embedding-provider.js";
+import { anonymizeTextForAI } from "../../modules/privacy/resume-anonymizer.js";
+import {
+  ensureExternalModelConsent,
+  ensureResumeConsent,
+} from "../../modules/privacy/privacy.service.js";
 
 const MAX_CHUNK_CHARS = 1_200;
 const MAX_QUERY_CHARS = 6_000;
@@ -33,16 +38,23 @@ export async function findRelevantResumeEvidence(input: {
   const chunks = splitResumeText(input.anonymizedResumeText);
   if (chunks.length === 0) return [];
 
-  const embedder = getTextEmbedder();
+  await ensureResumeConsent(input.ownerId.toHexString());
+  await ensureExternalModelConsent(input.ownerId);
   const queryText = input.queryText.trim().slice(0, MAX_QUERY_CHARS);
-  const vectors = await embedder.embed([...chunks, ...(queryText ? [queryText] : [])]);
-  const resumeVectors = vectors.slice(0, chunks.length);
-  const queryVector = queryText ? vectors[chunks.length] : resumeVectors[0];
+  const sanitizedInputs = await Promise.all(
+    [...chunks, ...(queryText ? [queryText] : [])].map((text) => anonymizeTextForAI(text)),
+  );
+  const sanitizedChunks = sanitizedInputs.slice(0, chunks.length);
+  const sanitizedQuery = queryText ? sanitizedInputs[chunks.length] : undefined;
+  const embedder = getTextEmbedder();
+  const vectors = await embedder.embed([...sanitizedChunks, ...(sanitizedQuery ? [sanitizedQuery] : [])]);
+  const resumeVectors = vectors.slice(0, sanitizedChunks.length);
+  const queryVector = sanitizedQuery ? vectors[sanitizedChunks.length] : resumeVectors[0];
   if (!queryVector) return [];
 
   const collection = getDb().collection<ResumeVectorDocument>("resume_vector_chunks");
   const now = new Date();
-  await collection.bulkWrite(chunks.map((content, chunkIndex) => ({
+  await collection.bulkWrite(sanitizedChunks.map((content, chunkIndex) => ({
     updateOne: {
       filter: { ownerId: input.ownerId, resumeId: input.resumeId, chunkIndex },
       update: {
@@ -60,7 +72,7 @@ export async function findRelevantResumeEvidence(input: {
   await collection.deleteMany({
     ownerId: input.ownerId,
     resumeId: input.resumeId,
-    chunkIndex: { $gte: chunks.length },
+    chunkIndex: { $gte: sanitizedChunks.length },
   });
 
   const storedChunks = await collection.find({ ownerId: input.ownerId, resumeId: input.resumeId }).toArray();

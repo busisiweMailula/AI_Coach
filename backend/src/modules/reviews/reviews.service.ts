@@ -15,6 +15,7 @@ import type {
   ResumeSuggestionDocument,
   ReviewItemDocument,
 } from "../ai-results/models.js";
+import type { ResumeDocument } from "../resumes/resume.model.js";
 
 const reviewConfigPath = fileURLToPath(new URL("../../../config/review-thresholds.v1.json", import.meta.url));
 const reviewDecisionSchema = z.object({
@@ -220,8 +221,9 @@ export async function getCoachReviewDetails(
   review: ReturnType<typeof toReviewResponse>;
   target:
     | ({ type: "job_match" } & Pick<JobMatchDocument, "score" | "scoreBreakdown" | "skillResults" | "disclaimer">)
-    | ({ type: "resume_suggestion" } & Pick<ResumeSuggestionDocument, "originalText" | "proposedText" | "reason" | "sourceSnippet">)
-    | { type: "resume_draft"; content: string }
+    | ({ type: "resume_suggestion" } & Pick<ResumeSuggestionDocument, "originalText" | "proposedText" | "reason" | "sourceSnippet">
+      & { candidateResume: CandidateResume })
+    | { type: "resume_draft"; content: string; candidateResume: CandidateResume }
     | ({ type: "interview_evaluation" }
       & Pick<InterviewEvaluationDocument, "overallScore" | "dimensions" | "strengths" | "improvements" | "exampleAnswer" | "confidence">
       & { answers: Array<{ question: string; answer: string }> });
@@ -250,6 +252,7 @@ export async function getCoachReviewDetails(
     const target = await getDb().collection<ResumeSuggestionDocument>("resume_suggestions")
       .findOne({ _id: item.targetId, ownerId: item.ownerId });
     if (!target) throw new NotFoundError("Review target not found");
+    const candidateResume = await getCandidateResume(item.ownerId, target.resumeId);
     return {
       review: toReviewResponse(item),
       target: {
@@ -258,14 +261,16 @@ export async function getCoachReviewDetails(
         proposedText: target.proposedText,
         reason: target.reason,
         sourceSnippet: target.sourceSnippet,
+        candidateResume,
       },
     };
   }
   if (item.targetType === "resume_draft") {
     if (!item.targetContent) throw new NotFoundError("Submitted CV draft not found");
+    const candidateResume = await getCandidateResume(item.ownerId, item.targetId);
     return {
       review: toReviewResponse(item),
-      target: { type: "resume_draft", content: item.targetContent },
+      target: { type: "resume_draft", content: item.targetContent, candidateResume },
     };
   }
 
@@ -300,6 +305,23 @@ export async function getCoachReviewDetails(
       confidence: evaluation.confidence,
       answers: answerDetails,
     },
+  };
+}
+
+interface CandidateResume {
+  fileName: string;
+  content: string;
+}
+
+async function getCandidateResume(ownerId: ObjectId, resumeId: ObjectId): Promise<CandidateResume> {
+  const resume = await getDb().collection<ResumeDocument>("resumes").findOne(
+    { _id: resumeId, ownerId },
+    { projection: { originalFileName: 1, extractedText: 1 } },
+  );
+  if (!resume) throw new NotFoundError("Candidate CV not found");
+  return {
+    fileName: resume.originalFileName,
+    content: resume.extractedText,
   };
 }
 

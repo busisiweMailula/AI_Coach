@@ -98,10 +98,12 @@ export type CoachReviewTarget =
       proposedText: string;
       reason: string;
       sourceSnippet: string;
+      candidateResume: { fileName: string; content: string };
     }
   | {
       type: "resume_draft";
       content: string;
+      candidateResume: { fileName: string; content: string };
     }
   | {
       type: "interview_evaluation";

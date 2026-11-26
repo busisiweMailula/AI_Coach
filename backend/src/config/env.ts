@@ -26,6 +26,8 @@ const envSchema = z.object({
   PRESIDIO_URL: z.string().url().default("http://127.0.0.1:5002"),
   PRESIDIO_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(60_000),
   PRESIDIO_API_TOKEN: z.string().min(32).optional(),
+  PRESIDIO_SPACY_MODEL: z.string().min(1).default("en_core_web_sm"),
+  PRESIDIO_PERSON_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.6),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().max(25 * 1024 * 1024).default(5 * 1024 * 1024),
   MAX_EXTRACTED_TEXT_CHARS: z.coerce.number().int().positive().max(1_000_000).default(200_000),
   MAX_PDF_PAGES: z.coerce.number().int().positive().max(500).default(100),

@@ -27,9 +27,9 @@ Interview practice accepts typed answers or editable browser speech transcripts,
 
 ## Local development
 
-1. Copy `.env.example` to `.env`, set `JWT_SECRET` and `PRESIDIO_API_TOKEN` to random values of at least 32 characters, and provide `INCEPTION_API_KEY`, `GROQ_API_KEY`, and `MISTRAL_API_KEY`. `EMBEDDING_PROVIDER=mistral` enables semantic matching. The configured `inception` provider uses Mercury 3 first and falls back to Groq's `openai/gpt-oss-120b` on network failures, timeouts, HTTP 410/429, or 5xx responses. To migrate to Groq before Inception's shutdown, set `LLM_PROVIDER=groq`; the app then uses `GROQ_MODEL`. Set `LLM_PROVIDER=disabled` to disable AI workflows. OpenAI API usage is billed separately from ChatGPT and is not enabled by this configuration. The Inception Mercury API is scheduled to stop serving requests after December 28, 2026; migrate before then. External processing also requires the candidate's `external_model_processing` consent. Only Presidio-processed resume text is sent to Mistral for embeddings. The `mock` provider is reserved for tests.
+1. Copy `.env.example` to `.env`, set `JWT_SECRET` and `PRESIDIO_API_TOKEN` to random values of at least 32 characters, and provide `INCEPTION_API_KEY`, `GROQ_API_KEY`, and `MISTRAL_API_KEY`. `EMBEDDING_PROVIDER=mistral` enables semantic matching. The configured `inception` provider uses Mercury 3 first and falls back to Groq's `openai/gpt-oss-120b` on network failures, timeouts, HTTP 410/429, or 5xx responses. To migrate to Groq before Inception's shutdown, set `LLM_PROVIDER=groq`; the app then uses `GROQ_MODEL`. Set `LLM_PROVIDER=disabled` to disable AI workflows. OpenAI API usage is billed separately from ChatGPT and is not enabled by this configuration. The Inception Mercury API is scheduled to stop serving requests after December 28, 2026; migrate before then. External processing also requires the candidate's `external_model_processing` consent. The API anonymizes serialized AI inputs, resume chunks, and embedding queries through Presidio before sending them to any external LLM or embedding provider; failures stop processing without an unredacted fallback. The `mock` provider is reserved for tests.
 2. Set `MONGODB_URI` to your hosted MongoDB connection string, `MONGODB_DB_NAME`, and `POSTGRES_URL` to your hosted PostgreSQL connection string in `.env`. The API requires both remote databases and connects to them before listening. Structured app records and uploaded files are stored in MongoDB/GridFS; audit events are written to PostgreSQL's `audit_logs` table. The admin audit-log view reads from PostgreSQL and resolves actor/subject emails from MongoDB.
-3. Create and install the Presidio Python virtual environment:
+3. Configure `PRESIDIO_SPACY_MODEL` (default `en_core_web_sm`) and `PRESIDIO_PERSON_CONFIDENCE_THRESHOLD` (default `0.6`) if needed. The service loads its validated, case-insensitive person allow-list from `presidio-service/person_allowlist.json`; deploy a valid JSON string array at that path or set `PRESIDIO_PERSON_ALLOWLIST_PATH`. Create and install the Presidio Python virtual environment:
 
    ```powershell
    Set-Location presidio-service
@@ -151,7 +151,7 @@ Resume uploads accept PDF/DOCX, validate file signatures and extract source text
 
 The consent and upload interface is a React + TypeScript SPA in `frontend/`. Candidates separately consent to CV processing and sending only the Presidio-processed text to an external model. Consent policy versions are controlled by the server, and each grant or withdrawal creates a new history record. The updated policies require renewed consent; the application does not claim POPIA compliance.
 
-The Presidio service is a separate Python component with its own `presidio-service/requirements.txt` and virtual environment; it does not install or run the TypeScript API or React frontend. Docker Compose keeps the service on the private Compose network and requires a shared API token. Presidio is a detection-and-replacement tool, not a guarantee of complete anonymization or legal compliance.
+The Presidio service is a separate Python component with its own `presidio-service/requirements.txt` and virtual environment; it does not install or run the TypeScript API or React frontend. It replaces only person, email, South African mobile, and valid South African ID detections with `<PERSON>`, `<EMAIL_ADDRESS>`, `<PHONE_NUMBER>`, and `<ZA_ID_NUMBER>`. Other CV text is retained. Docker Compose keeps the service on the private Compose network and requires a shared API token. Presidio is a detection-and-replacement tool, not a guarantee of complete anonymization or legal compliance.
 
 Registration cannot assign coach or admin roles. Provisioning those roles is intentionally reserved for a controlled administrative workflow.
 
@@ -181,7 +181,7 @@ npm test
 npm run build
 ```
 
-The phase 4/5 integration tests require MongoDB at `MONGODB_TEST_URI` or the default `mongodb://127.0.0.1:27017`; they use isolated, randomly named databases and remove them after each suite.
+The backend test runner starts a disposable MongoDB 7.0.14 on loopback for the phase 4/5 integration tests and stops it after the run. Tests run in a single forked worker and the test server's WiredTiger cache is capped at 256 MB to keep resource use bounded. The first run downloads the MongoDB test binary. Set `MONGODB_TEST_URI` to use an existing test-only MongoDB deployment instead, or set `MONGODB_TEST_VERSION` to select another compatible binary version. Integration suites use isolated, randomly named databases; do not point `MONGODB_TEST_URI` at production data.
 
 ```powershell
 Set-Location frontend
